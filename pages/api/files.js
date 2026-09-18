@@ -1,38 +1,39 @@
 export default async function handler(req, res) {
   const { path = '', password } = req.query;
-
   if (password !== process.env.SITE_PASSWORD) {
-    return res.status(401).json({ error: 'Unauthorized: Wrong Password' });
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPO;
 
-  if (!token || !repo) {
-    return res.status(500).json({ error: 'Server Config Error: Missing Token or Repo variable' });
-  }
-
   try {
-    // Use Bearer token and add User-Agent to avoid GitHub blocking the request
-    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-      headers: { 
-        'Authorization': `Bearer ${token}`, 
-        'User-Agent': 'Vercel-App-Downloader',
-        'Accept': 'application/vnd.github.v3+json'
-      },
+    // 1. Get the list of files/folders
+    const fileRes = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+      headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': 'Vercel-App' },
     });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error('GitHub API Error:', errorBody);
-      return res.status(response.status).json({ 
-        error: `GitHub Error (${response.status}): ${errorBody || 'Not Found'}` 
-      });
-    }
+    if (!fileRes.ok) return res.status(fileRes.status).json({ error: 'Folder not found' });
+    const allFiles = await fileRes.json();
 
-    const data = await response.json();
-    res.status(200).json(data);
+    // 2. Fetch the last commit message for every file to use as a description
+    const filesWithCommits = await Promise.all(allFiles.map(async (file) => {
+      try {
+        const commitRes = await fetch(`https://api.github.com/repos/${repo}/commits?path=${encodeURIComponent(file.path)}&per_page=1`, {
+          headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': 'Vercel-App' },
+        });
+        if (commitRes.ok) {
+          const commitData = await commitRes.json();
+          if (commitData.length > 0) {
+            return { ...file, description: commitData[0].commit.message };
+          }
+        }
+      } catch (e) {}
+      return { ...file, description: file.type === 'dir' ? 'Directory' : 'No description available' };
+    }));
+
+    res.status(200).json(filesWithCommits);
   } catch (error) {
-    res.status(500).json({ error: 'Critical System Error: ' + error.message });
+    res.status(500).json({ error: 'Server Error' });
   }
 }
