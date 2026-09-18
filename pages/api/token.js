@@ -1,6 +1,6 @@
 export default async function handler(req, res) {
   const { channelName } = req.query;
-  const appId = process.env.AGORA_APP_ID;
+  const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
   const appCertificate = process.env.AGORA_APP_CERTIFICATE;
 
   if (!channelName) return res.status(400).json({ error: 'channelName required' });
