@@ -1,25 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 export default function Home() {
-  // AUTH & UI STATE
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [activeTab, setActiveTab] = useState('files'); 
   
-  // FILE EXPLORER STATE
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // SPOTIFY STATE
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
 
-  // AGORA STATE
-  const [roomCode, setRoomCode] = useState(''); // The 5-digit code
-  const [inputCode, setInputCode] = useState(''); // Code entered by watcher
+  const [roomCode, setRoomCode] = useState(''); 
+  const [inputCode, setInputCode] = useState(''); 
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWatching, setIsWatching] = useState(false);
   
@@ -114,7 +110,6 @@ export default function Home() {
     window.location.href = url;
   };
 
-  // AGORA ENGINE
   const initAgora = async () => {
     if (!window.AgoraRTC) {
       await new Promise((resolve) => {
@@ -134,17 +129,17 @@ export default function Home() {
     try {
       await initAgora();
       const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
-      if (!appId) return alert("Agora App ID missing in Vercel settings!");
-
-      // Generate random 5-digit code
       const code = Math.floor(10000 + Math.random() * 90000).toString();
       setRoomCode(code);
 
-      await agoraClient.current.join(appId, code, null, null);
+      // GET TOKEN FROM OUR NEW API
+      const tokenRes = await fetch(`/api/token?channelName=${code}`);
+      const { token } = await tokenRes.json();
+
+      await agoraClient.current.join(appId, code, null, token);
       const localTrack = await AgoraRTC.createScreenShareTrack({
         encoderConfig: { contentHint: 'text' },
       });
-      
       localTrack.play();
       if (myVideoRef.current) myVideoRef.current.srcObject = localTrack;
       await agoraClient.current.publish([localTrack]);
@@ -153,13 +148,16 @@ export default function Home() {
   };
 
   const joinStream = async () => {
-    if (inputCode.length !== 5) return alert("Please enter a valid 5-digit code");
+    if (inputCode.length !== 5) return alert("Enter 5-digit code");
     try {
       await initAgora();
       const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
-      if (!appId) return alert("Agora App ID missing in Vercel settings!");
 
-      await agoraClient.current.join(appId, inputCode, null, null);
+      // GET TOKEN FROM OUR NEW API
+      const tokenRes = await fetch(`/api/token?channelName=${inputCode}`);
+      const { token } = await tokenRes.json();
+
+      await agoraClient.current.join(appId, inputCode, null, token);
       
       agoraClient.current.on('user-published', async (user, mediaType) => {
         await agoraClient.current.subscribe(user, mediaType);
@@ -169,7 +167,7 @@ export default function Home() {
         }
       });
       setIsWatching(true);
-    } catch (e) { alert("Could not join stream: " + e.message); }
+    } catch (e) { alert("Join failed: " + e.message); }
     };
 
   if (!isAuthorized) {
@@ -323,7 +321,7 @@ const styles = {
   fileIcon: { fontSize: '1.2rem', opacity: 0.5 },
   fileInfo: { flex: 1, overflow: 'hidden' },
   fileName: { fontWeight: '500', color: '#fff', fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  fileDesc: { fontSize: '0.75rem', color: '#555', whitePace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  fileDesc: { fontSize: '0.75rem', color: '#555', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   cardFooter: { textAlign: 'right', borderTop: '1px solid #111', paddingTop: '0.8rem' },
   actionBtn: { background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '0.8rem', fontWeight: '500' },
   loading: { textAlign: 'center', color: '#333', fontSize: '0.9rem', marginTop: '4rem' },
