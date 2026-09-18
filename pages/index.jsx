@@ -1,25 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 export default function Home() {
-  // AUTH & UI STATE
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [activeTab, setActiveTab] = useState('files'); 
   
-  // FILE EXPLORER STATE
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // SPOTIFY STATE
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
 
-  // P2P SCREEN SHARE STATE
+  // P2P STATE
   const [peerId, setPeerId] = useState('');
   const [remotePeerId, setRemotePeerId] = useState('');
+  const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [isSharing, setIsSharing] = useState(false);
   
   const [res, setRes] = useState('1080'); 
@@ -28,7 +26,7 @@ export default function Home() {
 
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const peerInstance = useRef(null); // Persistent Peer object
+  const peerInstance = useRef(null);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -39,7 +37,6 @@ export default function Home() {
     }
   }, []);
 
-  // Spotify Sync
   useEffect(() => {
     if (!spotifyToken) return;
     const updatePlayer = async () => {
@@ -62,7 +59,6 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [spotifyToken]);
 
-  // FILE LOGIC
   const fetchFiles = async (path = '') => {
     setLoading(true);
     try {
@@ -119,30 +115,29 @@ export default function Home() {
     window.location.href = url;
   };
 
-  // P2P CORE LOGIC
+  // P2P LOGIC
   useEffect(() => {
     if (activeTab === 'files') return;
+    
     const script = document.createElement('script');
     script.src = "https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js";
     script.async = true;
     script.onload = () => {
-      // Initialize a single persistent Peer instance
-      const peer = new window.Peer();
+      const peer = new window.Peer({ config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] }});
       peerInstance.current = peer;
 
-      peer.on('open', (id) => {
-        setPeerId(id);
-      });
+      peer.on('open', (id) => setPeerId(id));
 
-      // This is the "Handshake" - Listen for incoming calls
       peer.on('call', (call) => {
-        // If we are the streamer, answer with our screen stream
-        if (isSharing && myVideoRef.current) {
-          call.answer(myVideoRef.current.srcObject);
-        } else {
-          // Otherwise just answer with a silent stream to establish connection
-          call.answer(new MediaStream());
-        }
+        setConnectionStatus('Incoming call...');
+        // If we have a stream, answer with it
+        const stream = myVideoRef.current ? myVideoRef.current.srcObject : new MediaStream();
+        call.answer(stream);
+        call.on('stream', (remoteStream) => {
+          setRemoteStream(remoteStream);
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
+          setConnectionStatus('Connected');
+        });
       });
     };
     document.body.appendChild(script);
@@ -150,7 +145,7 @@ export default function Home() {
     return () => {
       if (peerInstance.current) peerInstance.current.destroy();
     };
-  }, [activeTab, isSharing]);
+  }, [activeTab]);
 
   const startStreaming = async () => {
     try {
@@ -170,18 +165,29 @@ export default function Home() {
 
   const joinStream = async () => {
     if (!remotePeerId) return alert("Enter a Peer ID");
-    if (!peerInstance.current) return alert("Peer system not initialized");
-
+    setConnectionStatus('Connecting...');
+    
     try {
-      // We call the streamer. Since we aren't sending a stream, we send a dummy one.
-      const call = peerInstance.current.call(remotePeerId, new MediaStream());
+      const peer = peerInstance.current;
+      // Call the streamer with a dummy stream
+      const call = peer.call(remotePeerId, new MediaStream());
       
       call.on('stream', (remoteStream) => {
+        setRemoteStream(remoteStream);
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = remoteStream;
+          remoteVideoRef.current.play().catch(e => console.log("Autoplay blocked"));
         }
+        setConnectionStatus('Connected');
       });
-    } catch (e) { alert("Connection failed: " + e.message); }
+
+      call.on('error', (err) => {
+        setConnectionStatus('Error: ' + err);
+      });
+    } catch (e) { 
+      setConnectionStatus('Connection failed');
+      alert("Connection failed: " + e.message); 
+    }
   };
 
   if (!isAuthorized) {
@@ -282,6 +288,7 @@ export default function Home() {
                 <input type="text" placeholder="Enter Streamer Peer ID" style={styles.input} value={remotePeerId} onChange={(e) => setRemotePeerId(e.target.value)} />
                 <button onClick={joinStream} style={styles.joinBtn}>Connect</button>
               </div>
+              <div style={styles.statusText}>Status: <span style={{color: connectionStatus === 'Connected' ? '#22c55e' : '#888'}}>{connectionStatus}</span></div>
             </div>
             <div style={styles.videoBox}>
               <span style={styles.videoLabel}>Remote Broadcast</span>
@@ -393,4 +400,5 @@ const styles = {
   joinBtn: { padding: '0.8rem 1.5rem', borderRadius: '8px', border: 'none', background: '#fff', color: '#000', fontWeight: 'bold', cursor: 'pointer' },
   videoBox: { width: '100%', maxWidth: '1000px', background: '#000', borderRadius: '16px', border: '1px solid #222', overflow: 'hidden' },
   videoLabel: { display: 'block', padding: '0.5rem', fontSize: '0.7rem', color: '#444', textAlign: 'center', borderBottom: '1px solid #222' },
+  statusText: { marginTop: '1rem', fontSize: '0.8rem', color: '#666' },
 };
