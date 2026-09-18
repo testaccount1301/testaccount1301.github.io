@@ -5,18 +5,20 @@ export default function Home() {
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [activeTab, setActiveTab] = useState('files'); 
+  
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
+
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
 
-  // STREAM STATE
   const [roomCode, setRoomCode] = useState(''); 
   const [inputCode, setInputCode] = useState(''); 
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
+  
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const socketRef = useRef(null);
@@ -109,9 +111,10 @@ export default function Home() {
     window.location.href = url;
   };
 
-  // P2P WEBRTC ENGINE
   const setupPeer = async (isStreamer) => {
     const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
+    if(!serverUrl) return alert("Server URL not set in Vercel!");
+
     socketRef.current = io(serverUrl);
 
     const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
@@ -142,7 +145,7 @@ export default function Home() {
         if (data.signal.type === 'offer') {
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          socketRef.current.emit('signal', { room: roomCode, signal: pc.localDescription });
+          socketP.current.emit('signal', { room: roomCode, signal: pc.localDescription });
         }
       } else if (data.signal.candidate) {
         await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
@@ -165,7 +168,6 @@ export default function Home() {
     setRoomCode(inputCode);
     setConnectionStatus('Connecting...');
     await setupPeer(false);
-    
     const pc = peerConnection.current;
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -344,7 +346,7 @@ const styles = {
   volIcon: { color: '#555', fontSize: '0.8rem' },
   volSlider: { width: '70px', accentColor: '#fff', cursor: 'pointer' },
   timerGroup: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', width: '60px' },
-  timerText: { fontSize: '0.65rem', color: '#555', marginBottom: '4px', fontFamily: 'monospace' },
+  timerText: { fontSize:, color: '#555', marginBottom: '4px', fontFamily: 'monospace' },
   progressMiniBg: { height: '3px', width: '100%', background: '#222', borderRadius: '2px', overflow: 'hidden' },
   progressMiniFill: { height: '100%', background: '#1db954' },
   shareContainer: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem' },
