@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function Home() {
   const [password, setPassword] = useState('');
@@ -8,7 +8,16 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [showSpotifyModal, setShowSpotifyModal] = useState(false);
+  const [spotifyToken, setSpotifyToken] = useState(null);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('spotify_token');
+    if (token) {
+      setSpotifyToken(token);
+      window.history.replaceState({}, document.title, "/");
+    }
+  }, []);
 
   const fetchFiles = async (path = '') => {
     setLoading(true);
@@ -56,10 +65,15 @@ export default function Home() {
     }
   };
 
-  const openSpotify = () => {
-    // This triggers the local Spotify App on the user's PC
-    window.location.href = "spotify:open"; 
-    setShowSpotifyModal(false);
+  const controlSpotify = async (action) => {
+    await fetch(`/api/spotify?action=${action}&token=${spotifyToken}`);
+  };
+
+  const connectSpotify = () => {
+    const clientID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID; // Simplified for example
+    const scope = 'user-modify-playback-state user-read-playback-state';
+    const url = `https://accounts.spotify.com/authorize?client_id=${clientID}&response_type=code&redirect_uri=https://testaccount1301githubio.vercel.app/api/spotify/callback&scope=${scope}`;
+    window.location.href = url;
   };
 
   if (!isAuthorized) {
@@ -81,19 +95,15 @@ export default function Home() {
           <div style={styles.titleGroup}>
             <h1 style={styles.title}>File Explorer</h1>
             <div style={styles.breadcrumb}>
-              <span style={{color: '#666'}}>Root</span> 
-              {currentPath && <span> / {currentPath}</span>}
+              <span style={{color: '#555'}}>Root</span> {currentPath && <span> / {currentPath}</span>}
             </div>
           </div>
-          <div style={styles.actions}>
-            <button onClick={() => setShowSpotifyModal(true)} style={styles.spotifyBtn}>🎵 Spotify</button>
-            <button onClick={() => fetchFiles('')} style={styles.rootBtn}>🏠 Home</button>
-          </div>
+          <button onClick={() => fetchFiles('')} style={styles.rootBtn}>🏠 Home</button>
         </div>
 
         {isDownloading && (
           <div style={styles.progressWrapper}>
-            <div style={styles.progressText}>Downloading asset... {downloadProgress}%</div>
+            <div style={styles.progressText}>Downloading... {downloadProgress}%</div>
             <div style={styles.progressBarBg}><div style={{ ...styles.progressBarFill, width: `${downloadProgress}%` }}></div></div>
           </div>
         )}
@@ -121,57 +131,56 @@ export default function Home() {
         )}
       </div>
 
-      {/* Spotify Modal Popup */}
-      {showSpotifyModal && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modal}>
-            <h3 style={styles.modalTitle}>Link Spotify</h3>
-            <p style={styles.modalText}>Would you like to open your local Spotify app to listen while you browse?</p>
-            <div style={styles.modalButtons}>
-              <button onClick={() => setShowSpotifyModal(false)} style={styles.modalCancel}>Cancel</button>
-              <button onClick={openSpotify} style={styles.modalConfirm}>Open App</button>
+      {/* FLOATING MUSIC BAR */}
+      <div style={styles.musicBar}>
+        {!spotifyToken ? (
+          <button onClick={connectSpotify} style={styles.connectBtn}>Connect Spotify</button>
+        ) : (
+          <div style={styles.controls}>
+            <span style={styles.musicLabel}>Spotify Active</span>
+            <div style={styles.btnGroup}>
+              <button onClick={() => controlSpotify('pause')} style={styles.musicBtn}>⏸</button>
+              <button onClick={() => controlSpotify('next')} style={styles.musicBtn}>⏭</button>
+              <button onClick={() => controlSpotify('play')} style={styles.musicBtn}>▶</button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </main>
   );
 }
 
 const styles = {
-  main: { padding: '3rem 1rem', fontFamily: '"Inter", system-ui, sans-serif', backgroundColor: '#0a0a0a', minHeight: '100vh', color: '#eee' },
-  container: { maxWidth: '1100px', margin: '0 auto' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '3rem', borderBottom: '1px solid #222', paddingBottom: '1.5rem' },
-  titleGroup: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
-  title: { fontSize: '2.2rem', fontWeight: '700', margin: 0, letterSpacing: '-1px' },
-  breadcrumb: { fontSize: '0.85rem', color: '#888', fontFamily: 'monospace' },
-  actions: { display: 'flex', gap: '1rem' },
-  rootBtn: { padding: '0.6rem 1rem', borderRadius: '6px', border: '1px solid #333', background: 'transparent', color: '#ccc', cursor: 'pointer', fontSize: '0.9rem' },
-  spotifyBtn: { padding: '0.6rem 1rem', borderRadius: '6px', border: '1px solid #1db954', background: 'transparent', color: '#1db954', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' },
-  authContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#000', fontFamily: 'sans-serif' },
-  authCard: { textAlign: 'center', background: '#0a0a0a', padding: '3rem', borderRadius: '16px', border: '1px solid #222', boxShadow: '0 20px 40px rgba(0,0,0,0.8)' },
-  authTitle: { color: 'white', marginBottom: '1.5rem', fontSize: '1.5rem', fontWeight: '400' },
-  input: { padding: '0.8rem', borderRadius: '8px', border: '1px solid #222', background: '#111', color: 'white', marginBottom: '1.5rem', display: 'block', width: '100%', outline: 'none', textAlign: 'center' },
+  main: { padding: '3rem 1rem', fontFamily: '"Inter", sans-serif', backgroundColor: '#050505', minHeight: '100vh', color: '#eee', paddingBottom: '100px' },
+  container: { maxWidth: '1000px', margin: '0 auto' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3rem', borderBottom: '1px solid #111', paddingBottom: '1.5rem' },
+  titleGroup: { display: 'flex', flexDirection: 'column', gap: '0.4rem' },
+  title: { fontSize: '2rem', fontWeight: '700', margin: 0, color: '#fff' },
+  breadcrumb: { fontSize: '0.8rem', color: '#666', fontFamily: 'monospace' },
+  rootBtn: { padding: '0.5rem 1rem', borderRadius: '6px', border: '1px solid #222', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: '0.8rem' },
+  authContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#000' },
+  authCard: { textAlign: 'center', background: '#0a0a0a', padding: '3rem', borderRadius: '16px', border: '1px solid #222' },
+  authTitle: { color: 'white', marginBottom: '1.5rem', fontSize: '1.5rem' },
+  input: { padding: '0.8rem', borderRadius: '8px', border: '1px solid #222', background: '#111', color: 'white', marginBottom: '1.5rem', display: 'block', width: '100%', textAlign: 'center' },
   button: { width: '100%', padding: '0.8rem', borderRadius: '8px', border: 'none', background: '#fff', color: '#000', fontWeight: '600', cursor: 'pointer' },
-  progressWrapper: { marginBottom: '2rem', padding: '1rem', background: '#111', borderRadius: '8px', border: '1px solid #222' },
-  progressText: { color: '#666', fontSize: '0.8rem', marginBottom: '0.5rem', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '1px' },
-  progressBarBg: { height: '4px', background: '#000', borderRadius: '2px', overflow: 'hidden' },
+  progressWrapper: { marginBottom: '2rem', padding: '1rem', background: '#0a0a0a', borderRadius: '8px', border: '1px solid #222' },
+  progressText: { color: '#555', fontSize: '0.7rem', marginBottom: '0.5rem', textAlign: 'center', textTransform: 'uppercase' },
+  progressBarBg: { height: '3px', background: '#111', borderRadius: '2px', overflow: 'hidden' },
   progressBarFill: { height: '100%', background: '#fff', transition: 'width 0.3s ease' },
-  fileGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' },
-  fileCard: { background: '#111', padding: '1.5rem', borderRadius: '12px', border: '1px solid #222', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', transition: 'border 0.2s' },
-  cardMain: { display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' },
-  fileIcon: { fontSize: '1.5rem', opacity: 0.7 },
+  fileGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' },
+  fileCard: { background: '#0a0a0a', padding: '1.5rem', borderRadius: '12px', border: '1px solid #1a1a1a', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' },
+  cardMain: { display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' },
+  fileIcon: { fontSize: '1.2rem', opacity: 0.5 },
   fileInfo: { flex: 1, overflow: 'hidden' },
-  fileName: { fontWeight: '600', color: '#fff', fontSize: '1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  fileDesc: { fontSize: '0.8rem', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: '2px' },
-  cardFooter: { borderTop: '1px solid #222', paddingTop: '1rem', textAlign: 'right' },
-  actionBtn: { background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '500', transition: 'color 0.2s' },
-  modalOverlay: { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  modal: { background: '#111', padding: '2rem', borderRadius: '16px', border: '1px solid #333', maxWidth: '400px', width: '90%', textAlign: 'center' },
-  modalTitle: { color: '#fff', fontSize: '1.3rem', marginBottom: '1rem' },
-  modalText: { color: '#888', fontSize: '0.9rem', marginBottom: '2rem', lineHeight: '1.5' },
-  modalButtons: { display: 'flex', gap: '1rem', justifyContent: 'center' },
-  modalCancel: { padding: '0.6rem 1.2rem', borderRadius: '6px', border: 'none', background: 'transparent', color: '#666', cursor: 'pointer' },
-  modalConfirm: { padding: '0.6rem 1.2rem', borderRadius: '6px', border: 'none', background: '#1db954', color: 'white', cursor: 'pointer', fontWeight: 'bold' },
-  loading: { textAlign: 'center', color: '#444', fontSize: '0.9rem', marginTop: '4rem' }
+  fileName: { fontWeight: '500', color: '#fff', fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  fileDesc: { fontSize: '0.75rem', color: '#555', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  cardFooter: { textAlign: 'right', borderTop: '1px solid #111', paddingTop: '0.8rem' },
+  actionBtn: { background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '0.8rem', fontWeight: '500' },
+  loading: { textAlign: 'center', color: '#333', fontSize: '0.9rem', marginTop: '4rem' },
+  musicBar: { position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)', padding: '10px 20px', background: 'rgba(10, 10, 10, 0.8)', backdropFilter: 'blur(10px)', borderRadius: '40px', border: '1px solid #222', display: 'flex', alignItems: 'center', gap: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' },
+  connectBtn: { background: '#1db954', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem' },
+  controls: { display: 'flex', alignItems: 'center', gap: '15px' },
+  musicLabel: { color: '#1db954', fontSize: '0.7rem', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' },
+  btnGroup: { display: 'flex', gap: '10px' },
+  musicBtn: { background: 'transparent', border: '1px solid #333', color: 'white', borderRadius: '50%', width: '30px', height: '30px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem' },
 };
