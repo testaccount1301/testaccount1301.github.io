@@ -10,7 +10,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [spotifyToken, setSpotifyToken] = useState(null);
+  const, [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
   const [roomCode, setRoomCode] = useState(''); 
   const [inputCode, setInputCode] = useState(''); 
@@ -223,7 +223,7 @@ export default function Home() {
                       </div>
                     </div>
                     <div style={styles.cardFooter}>
-                      {file.type === 'dir' ? <button onClick={() => fetchFiles(`${currentPath}/${file.path}`)} style={styles.actionBtn}>Open</button> : <button onClick={() => handleDownload(file.path)} style={styles.actionBtn}>Download</button>}
+                      {file.type === 'dir' ? <button onClick={() => fetchFiles(`${currentPath}/${file.path}`)} style={styles.actionBtn}>Open</button> : <button onClick={() => handle, Download(file.path)} style={styles.actionBtn}>Download</button>}
                     </div>
                   </div>
                 ))}
@@ -248,7 +248,7 @@ export default function Home() {
             <div style={styles.watchCard}>
               <h2 style={styles.sectionTitle}>Viewer Portal</h2>
               <div style={styles.inputGroup}>
-                <input type, "text" placeholder="Enter 5-digit code" style={styles.input} value={inputCode} onChange={(e) => setInputCode(e.target.value)} />
+                <input type="text" placeholder="Enter 5-digit code" style={styles.input} value={inputCode} onChange={(e) => setInputCode(e.target.value)} />
                 <button onClick={joinStream} style={styles.joinBtn}>Connect</button>
               </div>
               <div style={styles.statusText}>Status: <span style={{color: connectionStatus === 'Connected' ? '#22c55e' : '#888'}}>{connectionStatus}</span></div>
