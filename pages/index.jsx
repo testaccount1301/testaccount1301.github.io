@@ -1,28 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 export default function Home() {
-  // AUTH & UI STATE
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [activeTab, setActiveTab] = useState('files'); 
-  
-  // FILE EXPLORER STATE
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
-
-  // SPOTIFY STATE
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
-
-  // AGORA STATE
   const [roomCode, setRoomCode] = useState(''); 
   const [inputCode, setInputCode] = useState(''); 
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWatching, setIsWatching] = useState(false);
-  
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const agoraClient = useRef(null);
@@ -135,16 +127,11 @@ export default function Home() {
       const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
       const code = Math.floor(10000 + Math.random() * 90000).toString();
       setRoomCode(code);
-
       const tokenRes = await fetch(`/api/token?channelName=${code}`);
       const { token } = await tokenRes.json();
-      if (!token) throw new Error("Failed to get security token from server");
-
+      if (!token) throw new Error("Failed to get token");
       await agoraClient.current.join(appId, code, null, token);
-      const localTrack = await AgoraRTC.createScreenShareTrack({
-        encoderConfig: { contentHint: 'text' },
-      });
-      
+      const localTrack = await AgoraRTC.createScreenShareTrack({ encoderConfig: { contentHint: 'text' } });
       localTrack.play();
       if (myVideoRef.current) myVideoRef.current.srcObject = localTrack;
       await agoraClient.current.publish([localTrack]);
@@ -157,13 +144,10 @@ export default function Home() {
     try {
       await initAgora();
       const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
-
       const tokenRes = await fetch(`/api/token?channelName=${inputCode}`);
       const { token } = await tokenRes.json();
-      if (!token) throw new Error("Invalid Room Code or Token Expired");
-
+      if (!token) throw new Error("Invalid Code");
       await agoraClient.current.join(appId, inputCode, null, token);
-      
       agoraClient.current.on('user-published', async (user, mediaType) => {
         await agoraClient.current.subscribe(user, mediaType);
         if (mediaType === 'video') {
