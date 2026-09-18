@@ -69,12 +69,14 @@ export default function Home() {
     await fetch(`/api/spotify?action=${action}&token=${spotifyToken}`);
   };
 
-  const connectSpotify = () => {
-    const clientID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID; // Simplified for example
+   const connectSpotify = () => {
+    // We use the NEXT_PUBLIC_ prefix so the browser can see the ID
+    const clientID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID; 
     const scope = 'user-modify-playback-state user-read-playback-state';
     const url = `https://accounts.spotify.com/authorize?client_id=${clientID}&response_type=code&redirect_uri=https://testaccount1301githubio.vercel.app/api/spotify/callback&scope=${scope}`;
     window.location.href = url;
   };
+
 
   if (!isAuthorized) {
     return (
