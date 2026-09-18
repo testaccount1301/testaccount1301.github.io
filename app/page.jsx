@@ -1,49 +1,110 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function Home() {
-  const [path, setPath] = useState('');
+  const [password, setPassword] = useState('');
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [currentPath, setCurrentPath] = useState('');
+  const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const handleDownload = async () => {
-    if (!path) return alert('Please enter a file path');
+  // Function to fetch files from the current path
+  const fetchFiles = async (path = '') => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/download?path=${encodeURIComponent(path)}`);
-      if (!response.ok) throw new Error('File not found');
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = path.split('/').pop() || 'file'; 
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch (err) {
-      alert(err.message);
+      const res = await fetch(`/api/files?path=${encodeURIComponent(path)}&password=${password}`);
+      if (!res.ok) throw new Error('Unauthorized or not found');
+      const data = await res.json();
+      setFiles(data);
+      setCurrentPath(path);
+    } catch (e) {
+      alert(e.message);
+      setIsAuthorized(false);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleLogin = (e) => {
+    e.preventDefault();
+    setIsAuthorized(true);
+    fetchFiles(''); // Load root directory
+  };
+
+  const handleDownload = async (filePath) => {
+    const response = await fetch(`/api/download?path=${encodeURIComponent(filePath)}`);
+    if (!response.ok) return alert('Download failed');
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filePath.split('/').pop();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  // PASSWORD SCREEN
+  if (!isAuthorized) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontFamily: 'sans-serif', backgroundColor: '#121212', color: 'white' }}>
+        <form onSubmit={handleLogin} style={{ textAlign: 'center', background: '#1e1e1e', padding: '2rem', borderRadius: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', border: '1px solid #333' }}>
+          <h2 style={{ marginBottom: '1rem' }}>🔒 Private Access</h2>
+          <input 
+            type="password" 
+            placeholder="Enter Password" 
+            style={{ padding: '0.7rem', borderRadius: '6px', border: '1px solid #444', background: '#2a2a2a', color: 'white', marginBottom: '1rem', display: 'block', width: '100%' }}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <button style={{ width: '100%', padding: '0.7rem', borderRadius: '6px', border: 'none', background: '#0070f3', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Enter</button>
+        </form>
+      </div>
+    );
+  }
+
+  // FILE EXPLORER SCREEN
   return (
-    <main style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', fontFamily: 'sans-serif', backgroundColor: '#f4f4f9' }}>
-      <div style={{ padding: '2rem', background: 'white', boxShadow: '0 4px 10px rgba(0,0,0,0.1)', borderRadius: '12px', maxWidth: '400px', width: '90%', textAlign: 'center' }}>
-        <h1 style={{ fontSize: '1.5rem', marginBottom: '1rem', color: '#333' }}>GitHub Downloader</h1>
-        <input 
-          type="text" 
-          placeholder="folder/file.txt" 
-          style={{ width: '100%', padding: '0.7rem', marginBottom: '1rem', border: '1px solid #ccc', borderRadius: '6px', boxSizing: 'border-box' }}
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-        />
-        <button 
-          onClick={handleDownload}
-          disabled={loading}
-          style={{ width: '100%', background: '#0070f3', color: 'white', padding: '0.7rem', borderRadius: '6px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
-        >
-          {loading ? 'Downloading...' : 'Download File'}
-        </button>
+    <main style={{ padding: '2rem', fontFamily: 'sans-serif', backgroundColor: '#f8f9fa', minHeight: '100vh' }}>
+      <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+          <div>
+            <h1 style={{ fontSize: '1.8rem', margin: 0 }}>📁 Repo Explorer</h1>
+            <p style={{ color: '#666' }}>Path: <code>/{currentPath}</code></p>
+          </div>
+          <button onClick={() => fetchFiles('')} style={{ padding: '0.5rem 1rem', cursor: 'pointer', borderRadius: '6px', border: '1px solid #ccc', background: 'white' }}>🏠 Root</button>
+        </div>
+
+        {loading ? <p>Loading files...</p> : (
+          <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #ddd', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead style={{ background: '#f1f1f1', borderBottom: '1px solid #ddd' }}>
+                <tr>
+                  <th style={{ padding: '1rem' }}>Name</th>
+                  <th style={{ padding: '1rem' }}>Type</th>
+                  <th style={{ padding: '1rem', textAlign: 'right' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {files.map((file, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #eee', cursor: 'pointer' }}>
+                    <td style={{ padding: '1rem', color: '#333', fontWeight: file.type === 'dir' ? 'bold' : 'normal' }}>
+                      {file.name}
+                    </td>
+                    <td style={{ padding: '1rem', color: '#888', fontSize: '0.9rem' }}>{file.type}</td>
+                    <td style={{ padding: '1rem', textAlign: 'right' }}>
+                      {file.type === 'dir' ? (
+                        <button onClick={() => fetchFiles(`${currentPath}/${file.path}`)} style={{ color: '#0070f3', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Open ➔</button>
+                      ) : (
+                        <button onClick={() => handleDownload(file.path)} style={{ color: '#28a745', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Download ⬇</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </main>
   );
