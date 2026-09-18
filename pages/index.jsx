@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { io } from 'socket.io-client';
 
 export default function Home() {
   const [password, setPassword] = useState('');
@@ -11,13 +12,15 @@ export default function Home() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
+
+  // STREAM STATE
   const [roomCode, setRoomCode] = useState(''); 
   const [inputCode, setInputCode] = useState(''); 
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [isWatching, setIsWatching] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const agoraClient = useRef(null);
+  const socketRef = useRef(null);
+  const peerConnection = useRef(null);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -106,58 +109,69 @@ export default function Home() {
     window.location.href = url;
   };
 
-  const initAgora = async () => {
-    if (!window.AgoraRTC) {
-      await new Promise((resolve) => {
-        const script = document.createElement('script');
-        script.src = "https://download.agora.io/sdk/release/AgoraRTC_N-4.18.0.js";
-        script.async = true;
-        script.onload = resolve;
-        document.body.appendChild(script);
-      });
-    }
-    if (!agoraClient.current) {
-      agoraClient.current = window.AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
-    }
-  };
+  // P2P WEBRTC ENGINE
+  const setupPeer = async (isStreamer) => {
+    const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
+    socketRef.current = io(serverUrl);
 
-  const startStream = async () => {
-    try {
-      await initAgora();
-      const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    if (myVideoRef.current) myVideoRef.current.srcObject = stream;
+
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+    peerConnection.current = pc;
+
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socketRef.current.emit('signal', { room: roomCode, signal: { candidate: event.candidate } });
+      }
+    };
+
+    if (isStreamer) {
       const code = Math.floor(10000 + Math.random() * 90000).toString();
       setRoomCode(code);
-      const tokenRes = await fetch(`/api/token?channelName=${code}`);
-      const { token } = await tokenRes.json();
-      if (!token) throw new Error("Failed to get token");
-      await agoraClient.current.join(appId, code, null, token);
-      const localTrack = await AgoraRTC.createScreenShareTrack({ encoderConfig: { contentHint: 'text' } });
-      localTrack.play();
-      if (myVideoRef.current) myVideoRef.current.srcObject = localTrack;
-      await agoraClient.current.publish([localTrack]);
-      setIsStreaming(true);
-    } catch (e) { alert("Stream failed: " + e.message); }
+      socketRef.current.emit('join-room', code);
+    }
+
+    socketRef.current.on('signal', async (data) => {
+      if (data.signal.sdp) {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
+        if (data.signal.type === 'offer') {
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socketRef.current.emit('signal', { room: roomCode, signal: pc.localDescription });
+        }
+      } else if (data.signal.candidate) {
+        await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+      }
+    });
+
+    pc.ontrack = (event) => {
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
+      setConnectionStatus('Connected');
+    };
+  };
+
+  const startStreaming = async () => {
+    setConnectionStatus('Initializing...');
+    await setupPeer(true);
   };
 
   const joinStream = async () => {
     if (inputCode.length !== 5) return alert("Enter 5-digit code");
-    try {
-      await initAgora();
-      const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
-      const tokenRes = await fetch(`/api/token?channelName=${inputCode}`);
-      const { token } = await tokenRes.json();
-      if (!token) throw new Error("Invalid Code");
-      await agoraClient.current.join(appId, inputCode, null, token);
-      agoraClient.current.on('user-published', async (user, mediaType) => {
-        await agoraClient.current.subscribe(user, mediaType);
-        if (mediaType === 'video') {
-          const remoteTrack = user.videoTrack;
-          remoteTrack.play(remoteVideoRef.current);
-        }
-      });
-      setIsWatching(true);
-    } catch (e) { alert("Join failed: " + e.message); }
-    };
+    setRoomCode(inputCode);
+    setConnectionStatus('Connecting...');
+    await setupPeer(false);
+    
+    const pc = peerConnection.current;
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socketRef.current.emit('signal', { room: inputCode, signal: pc.localDescription });
+    socketRef.current.emit('join-room', inputCode);
+  };
 
   if (!isAuthorized) {
     return (
@@ -222,12 +236,12 @@ export default function Home() {
           <div style={styles.shareContainer}>
             <div style={styles.settingsCard}>
               <h2 style={styles.sectionTitle}>Broadcaster</h2>
-              <p style={styles.streamSubtitle}>Generate a 5-digit code to let others watch your screen.</p>
-              <button onClick={startStream} style={styles.startBtn}>🚀 Go Live Now</button>
+              <p style={styles.streamSubtitle}>Start a secure P2P broadcast from your PC.</p>
+              <button onClick={startStreaming} style={styles.startBtn}>🚀 Go Live Now</button>
               {roomCode && <div style={styles.peerInfo}>Your Code: <code style={styles.peerCode}>{roomCode}</code></div>}
             </div>
             <div style={styles.previewBox}>
-              <span style={styles.previewLabel}>Stream Preview</span>
+              <span style={styles.previewLabel}>Local Preview</span>
               <video ref={myVideoRef} autoPlay muted style={styles.videoElement} />
             </div>
           </div>
@@ -239,6 +253,7 @@ export default function Home() {
                 <input type="text" placeholder="Enter 5-digit code" style={styles.input} value={inputCode} onChange={(e) => setInputCode(e.target.value)} />
                 <button onClick={joinStream} style={styles.joinBtn}>Connect</button>
               </div>
+              <div style={styles.statusText}>Status: <span style={{color: connectionStatus === 'Connected' ? '#22c55e' : '#888'}}>{connectionStatus}</span></div>
             </div>
             <div style={styles.videoBox}>
               <span style={styles.videoLabel}>Live Broadcast</span>
@@ -348,4 +363,5 @@ const styles = {
   joinBtn: { padding: '0.8rem 1.5rem', borderRadius: '8px', border: 'none', background: '#fff', color: '#000', fontWeight: 'bold', cursor: 'pointer' },
   videoBox: { width: '100%', maxWidth: '1000px', background: '#000', borderRadius: '16px', border: '1px solid #222', overflow: 'hidden' },
   videoLabel: { display: 'block', padding: '0.5rem', fontSize: '0.7rem', color: '#444', textAlign: 'center', borderBottom: '1px solid #222' },
+  statusText: { marginTop: '1rem', fontSize: '0.8rem', color: '#666' },
 };
