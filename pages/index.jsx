@@ -10,7 +10,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
-  const, [spotifyToken, setSpotifyToken] = useState(null);
+  const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
   const [roomCode, setRoomCode] = useState(''); 
   const [inputCode, setInputCode] = useState(''); 
@@ -135,6 +135,7 @@ export default function Home() {
       socketRef.current.emit('join-room', code);
     }
 
+    socketPRef = socketRef.current;
     socketRef.current.on('signal', async (data) => {
       if (data.signal.sdp) {
         await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
@@ -223,7 +224,7 @@ export default function Home() {
                       </div>
                     </div>
                     <div style={styles.cardFooter}>
-                      {file.type === 'dir' ? <button onClick={() => fetchFiles(`${currentPath}/${file.path}`)} style={styles.actionBtn}>Open</button> : <button onClick={() => handle, Download(file.path)} style={styles.actionBtn}>Download</button>}
+                      {file.type === 'dir' ? <button onClick={() => fetchFiles(`${currentPath}/${file.path}`)} style={styles.actionBtn}>Open</button> : <button onClick={() => handleDownload(file.path)} style={styles.actionBtn}>Download</button>}
                     </div>
                   </div>
                 ))}
