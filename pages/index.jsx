@@ -123,10 +123,18 @@ export default function Home() {
       }
     };
 
-    pc.ontrack = (event) => {
+    pc.ontrack = async (event) => {
+      console.log("✅ Remote Track received! Attempting to play...");
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = event.streams[0];
-        setConnectionStatus('Connected');
+        try {
+          // FORCE PLAY: Bypasses most browser blocks
+          await remoteVideoRef.current.play(); 
+          setConnectionStatus('Connected');
+        } catch (e) {
+          console.error("Playback failed, but track is here:", e);
+          setConnectionStatus('Connected (Muted/Blocked)');
+        }
       }
     };
 
@@ -288,7 +296,7 @@ export default function Home() {
             </div>
             <div style={styles.videoBox}>
               <span style={styles.videoLabel}>Live Broadcast</span>
-              {/* FIXED: Added muted attribute to bypass browser autoplay blocks */}
+              {/* FIXED: added muted and forced minimum height via styles */}
               <video ref={remoteVideoRef} autoPlay playsInline muted style={styles.videoElement} />
             </div>
           </div>
@@ -388,7 +396,7 @@ const styles = {
   peerCode: { color: '#3b82f6', fontWeight: 'bold' },
   previewBox: { width: '100%', maxWidth: '800px', marginTop: '2rem', background: '#000', borderRadius: '12px', border: '1px solid #222', overflow: 'hidden' },
   previewLabel: { display: 'block', padding: '0.5rem', fontSize: '0.7rem', color: '#444', textAlign: 'center' },
-  videoElement: { width: '100%', height: 'auto', display: 'block' },
+  videoElement: { width: '100%', minHeight: '400px', display: 'block', backgroundColor: '#000' },
   watchContainer: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem' },
   watchCard: { background: '#0a0a0a', padding: '2rem', borderRadius: '16px', border: '1px solid #222', width: '100%', maxWidth: '500px', textAlign: 'center' },
   inputGroup: { display: 'flex', gap: '10px', marginTop: '1rem' },
