@@ -104,14 +104,16 @@ export default function Home() {
   const connectSpotify = () => {
     const clientID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID;
     const scope = 'user-modify-playback-state user-read-playback-state';
-    const url = `https://accounts.spotify.com/authorize?client_id=${clientID}&response_type=code&redirect_uri=https://testaccount1301githubio.vercel.app/api/spotify/callback&scope=${scope}`;
+    const url = `https://accounts.spotify.com/authorize?client_id=${clientID}&response_type=code&redirect_uri=${window.location.origin}/api/spotify/callback&scope=${scope}`;
     window.location.href = url;
   };
 
-  // P2P CORE
   const createPeer = (stream = null) => {
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
     });
 
     if (stream) {
@@ -138,7 +140,9 @@ export default function Home() {
     try {
       setConnectionStatus('Initializing...');
       const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
-      socketRef.current = io(serverUrl);
+      
+      // FIX: Forced WebSockets to prevent Ngrok hang
+      socketRef.current = io(serverUrl, { transports: ['websocket'] });
 
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       if (myVideoRef.current) myVideoRef.current.srcObject = stream;
@@ -173,7 +177,7 @@ export default function Home() {
     
     try {
       const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
-      socketRef.current = io(serverUrl);
+      socketRef.current = io(serverUrl, { transports: ['websocket'] });
       const code = inputCode;
       setRoomCode(code);
       socketRef.current.emit('join-room', code);
@@ -198,12 +202,7 @@ export default function Home() {
         }
       });
 
-      pc.ontrack = (event) => {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-          setConnectionStatus('Connected');
-        }
-      };
+      setConnectionStatus('Connected');
     } catch (e) { alert("Join failed: " + e.message); }
   };
 
