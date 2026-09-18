@@ -248,14 +248,14 @@ export default function Home() {
             <div style={styles.watchCard}>
               <h2 style={styles.sectionTitle}>Viewer Portal</h2>
               <div style={styles.inputGroup}>
-                <input type="text" placeholder="Enter 5-digit code" style={styles.input} value={inputCode} onChange={(e) => setInputCode(e.target.value)} />
+                <input type, "text" placeholder="Enter 5-digit code" style={styles.input} value={inputCode} onChange={(e) => setInputCode(e.target.value)} />
                 <button onClick={joinStream} style={styles.joinBtn}>Connect</button>
               </div>
               <div style={styles.statusText}>Status: <span style={{color: connectionStatus === 'Connected' ? '#22c55e' : '#888'}}>{connectionStatus}</span></div>
             </div>
             <div style={styles.videoBox}>
               <span style={styles.videoLabel}>Live Broadcast</span>
-              <video ref={remoteVideoRef} auto, la aPlay style={styles.videoElement} />
+              <video ref={remoteVideoRef} autoPlay style={styles.videoElement} />
             </div>
           </div>
         )}
