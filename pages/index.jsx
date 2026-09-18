@@ -1,7 +1,10 @@
+'use client'; // <--- THIS LINE PREVENTS THE APPLICATION ERROR
+
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
 export default function Home() {
+  // --- STATE ---
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [activeTab, setActiveTab] = useState('files'); 
@@ -13,6 +16,7 @@ export default function Home() {
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
   const [roomCode, setRoomCode] = useState(''); 
+  const [inputCode, setInputCode] = useState(''); 
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   
   const myVideoRef = useRef(null);
@@ -20,17 +24,116 @@ export default function Home() {
   const socketRef = useRef(null);
   const peerConnection = useRef(null);
 
-  // 1. HANDLE INITIAL LOAD (Spotify & Auto-Join Room)
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    
-    // Spotify Token
-    const token = urlParams.get('spotify_token');
-    if (token) {
-      setSpotifyToken(token);
+  // --- HELPER: Create Peer Connection ---
+  const createPeer = (stream = null) => {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+
+    if (stream) {
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
     }
 
-    // AUTO-JOIN ROOM via Link
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socketRef.current) {
+        socketRef.current.emit('signal', { room: roomCode, signal: { candidate: event.candidate } });
+      }
+    };
+
+    pc.ontrack = async (event) => {
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = event.streams[0];
+        try {
+          await remoteVideoRef.current.play();
+          setConnectionStatus('Connected');
+        } catch (e) {
+          setConnectionStatus('Connected (Blocked)');
+        }
+      }
+    };
+    return pc;
+  };
+
+  // --- CORE: Join Stream ---
+  const joinStream = async (codeFromUrl = null) => {
+    const code = codeFromUrl || inputCode;
+    if (!code || code.length !== 5) {
+      if (!codeFromUrl) alert("Enter 5-digit code");
+      return;
+    }
+    
+    setConnectionStatus('Connecting...');
+    try {
+      if (socketRef.current) { socketRef.current.off('signal'); socketRef.current.disconnect(); }
+      if (peerConnection.current) peerConnection.current.close();
+
+      const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
+      socketRef.current = io(serverUrl, { transports: ['websocket'] });
+      setRoomCode(code);
+      socketRef.current.emit('join-room', code);
+
+      const pc = createPeer();
+      peerConnection.current = pc;
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
+
+      socketRef.current.on('signal', async (data) => {
+        if (data.signal.sdp) {
+          if (data.signal.type === 'answer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
+          }
+        } else if (data.signal.candidate) {
+          try { await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate)); } catch (e) {}
+        }
+      });
+      setConnectionStatus('Connected');
+    } catch (e) { console.error("Join failed:", e); }
+  };
+
+  // --- CORE: Start Streaming ---
+  const startStreaming = async () => {
+    try {
+      setConnectionStatus('Initializing...');
+      if (socketRef.current) { socketRef.current.off('signal'); socketRef.current.disconnect(); }
+      if (peerConnection.current) peerConnection.current.close();
+
+      const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
+      socketRef.current = io(serverUrl, { transports: ['websocket'] });
+
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      if (myVideoRef.current) myVideoRef.current.srcObject = stream;
+
+      const pc = createPeer(stream);
+      peerConnection.current = pc;
+
+      const code = Math.floor(10000 + Math.random() * 90000).toString();
+      setRoomCode(code);
+      socketRef.current.emit('join-room', code);
+
+      socketRef.current.on('signal', async (data) => {
+        if (data.signal.sdp) {
+          if (data.signal.type === 'offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
+          }
+        } else if (data.signal.candidate) {
+          try { await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate)); } catch (e) {}
+        }
+      });
+      setConnectionStatus('Live');
+    } catch (e) { alert("Stream failed: " + e.message); }
+  };
+
+  // --- EFFECTS ---
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('spotify_token');
+    if (token) setSpotifyToken(token);
+
     const room = urlParams.get('room');
     if (room) {
       setActiveTab('watch');
@@ -60,6 +163,7 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [spotifyToken]);
 
+  // --- OTHER FUNCTIONS ---
   const fetchFiles = async (path = '') => {
     setLoading(true);
     try {
@@ -114,108 +218,6 @@ export default function Home() {
     const scope = 'user-modify-playback-state user-read-playback-state';
     const url = `https://accounts.spotify.com/authorize?client_id=${clientID}&response_type=code&redirect_uri=${window.location.origin}/api/spotify/callback&scope=${scope}`;
     window.location.href = url;
-  };
-
-  const createPeer = (stream = null) => {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    });
-
-    if (stream) {
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-    }
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate && socketRef.current) {
-        socketRef.current.emit('signal', { room: roomCode, signal: { candidate: event.candidate } });
-      }
-    };
-
-    pc.ontrack = async (event) => {
-      console.log("✅ Remote Track received!");
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-        try {
-          await remoteVideoRef.current.play();
-          setConnectionStatus('Connected');
-        } catch (e) {
-          setConnectionStatus('Connected (Blocked)');
-        }
-      }
-    };
-
-    return pc;
-  };
-
-  const startStreaming = async () => {
-    try {
-      setConnectionStatus('Initializing...');
-      if (socketRef.current) { socketRef.current.off('signal'); socketRef.current.disconnect(); }
-      if (peerConnection.current) peerConnection.current.close();
-
-      const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
-      socketRef.current = io(serverUrl, { transports: ['websocket'] });
-
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-      if (myVideoRef.current) myVideoRef.current.srcObject = stream;
-
-      const pc = createPeer(stream);
-      peerConnection.current = pc;
-
-      const code = Math.floor(10000 + Math.random() * 90000).toString();
-      setRoomCode(code);
-      socketRef.current.emit('join-room', code);
-
-      socketRef.current.on('signal', async (data) => {
-        if (data.signal.sdp) {
-          if (data.signal.type === 'offer') {
-            await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
-          }
-        } else if (data.signal.candidate) {
-          try { await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate)); } catch (e) {}
-        }
-      });
-
-      setConnectionStatus('Live');
-    } catch (e) { alert("Stream failed: " + e.message); }
-  };
-
-  const joinStream = async (codeFromUrl = null) => {
-    const code = codeFromUrl || roomCode;
-    if (!code || code.length !== 5) return;
-    
-    setConnectionStatus('Connecting...');
-    try {
-      if (socketRef.current) { socketRef.current.off('signal'); socketRef.current.disconnect(); }
-      if (peerConnection.current) peerConnection.current.close();
-
-      const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
-      socketRef.current = io(serverUrl, { transports: ['websocket'] });
-      setRoomCode(code);
-      socketRef.current.emit('join-room', code);
-
-      const pc = createPeer();
-      peerConnection.current = pc;
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
-
-      socketRef.current.on('signal', async (data) => {
-        if (data.signal.sdp) {
-          if (data.signal.type === 'answer') {
-            await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
-          }
-        } else if (data.signal.candidate) {
-          try { await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate)); } catch (e) {}
-        }
-      });
-
-      setConnectionStatus('Connected');
-    } catch (e) { console.error("Join failed:", e); }
   };
 
   if (!isAuthorized) {
