@@ -14,20 +14,13 @@ export default function Home() {
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
 
-  // P2P STATE
-  const [peerId, setPeerId] = useState('');
-  const [remotePeerId, setRemotePeerId] = useState('');
-  const [connectionStatus, setConnectionStatus] = useState('Disconnected');
-  const [isSharing, setIsSharing] = useState(false);
-  
-  const [res, setRes] = useState('1080'); 
-  const [fps, setFps] = useState('60');   
-  const [withAudio, setWithAudio] = useState(true);
-
+  // AGORA STATE
+  const [channelName, setChannelName] = useState('main-vault');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [isWatching, setIsWatching] = useState(false);
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const peerInstance = useRef(null);
-  const localStreamRef = useRef(null);
+  const agoraClient = useRef(null);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -38,7 +31,6 @@ export default function Home() {
     }
   }, []);
 
-  // SPOTIFY SYNC
   useEffect(() => {
     if (!spotifyToken) return;
     const updatePlayer = async () => {
@@ -61,7 +53,6 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [spotifyToken]);
 
-  // FILE LOGIC
   const fetchFiles = async (path = '') => {
     setLoading(true);
     try {
@@ -118,75 +109,53 @@ export default function Home() {
     window.location.href = url;
   };
 
-  // P2P ENGINE - Initialized once on mount
-  useEffect(() => {
-    const script = document.createElement('script');
-    script.src = "https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js";
-    script.async = true;
-    script.onload = () => {
-      // Use Google's STUN servers to help bypass firewalls
-      const peer = new window.Peer({
-        config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] }
-      });
-      peerInstance.current = peer;
+  // AGORA CORE ENGINE
+  const initAgora = async () => {
+    if (!window.AgoraRTC) {
+      const script = document.createElement('script');
+      script.src = "https://download.agora.io/sdk/release/AgoraRTC_N-4.18.0.js";
+      script.async = true;
+      await new Promise(resolve => { script.onload = resolve; });
+      document.body.appendChild(script);
+    }
+    agoraClient.current = window.AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+  };
 
-      peer.on('open', (id) => setPeerId(id));
-
-      peer.on('call', (call) => {
-        setConnectionStatus('Incoming Stream...');
-        // If we have a local stream, send it. Otherwise send empty.
-        const stream = localStreamRef.current || new MediaStream();
-        call.answer(stream);
-        call.on('stream', (remoteStream) => {
-          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
-          setConnectionStatus('Connected');
-        });
-      });
-    };
-    document.body.appendChild(script);
-    return () => { if (peerInstance.current) peerInstance.current.destroy(); };
-  }, []);
-
-  const startStreaming = async () => {
+  const startStream = async () => {
     try {
-      const constraints = {
-        video: { 
-          width: { ideal: res === '1080' ? 1920 : res === '2160' ? 3840 : 1280 },
-          height: { ideal: res === '1080' ? 1080 : res === '2160' ? 2160 : 720 },
-          frameRate: { ideal: parseInt(fps) }
-        },
-        audio: withAudio
-      };
-      const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
-      localStreamRef.current = stream;
-      if (myVideoRef.current) myVideoRef.current.srcObject = stream;
-      setIsSharing(true);
-    } catch (e) { alert("Capture failed: " + e.message); }
+      await initAgora();
+      const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID; // You can pass this from Vercel via a public var or hardcode it
+      const uid = null; // Let Agora assign a random ID
+      
+      await agoraClient.current.join(appId, channelName, uid, null);
+      
+      const localTrack = await AgoraRTC.createScreenShareTrack({
+        encoderConfig: { contentHint: 'text' }, // Optimized for screen share
+      });
+      
+      localTrack.play();
+      if (myVideoRef.current) myVideoRef.current.srcObject = localTrack;
+      await agoraClient.current.publish([localTrack]);
+      setIsStreaming(true);
+    } catch (e) { alert("Stream failed: " + e.message); }
   };
 
   const joinStream = async () => {
-    if (!remotePeerId) return alert("Enter a Peer ID");
-    setConnectionStatus('Connecting...');
-    
     try {
-      const peer = peerInstance.current;
-      // We call the streamer. We send a dummy stream so they can answer.
-      const call = peer.call(remotePeerId, new MediaStream());
+      await initAgora();
+      const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
+      await agoraClient.current.join(appId, channelName, null, null);
       
-      call.on('stream', (remoteStream) => {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream;
-          remoteVideoRef.current.play().catch(e => console.log("Autoplay blocked"));
+      agoraClient.current.on('user-published', async (user, mediaType) => {
+        await agoraClient.current.subscribe(user, mediaType);
+        if (mediaType === 'video') {
+          const remoteTrack = user.videoTrack;
+          remoteTrack.play(remoteVideoRef.current);
         }
-        setConnectionStatus('Connected');
       });
-
-      call.on('close', () => setConnectionStatus('Stream Ended'));
-    } catch (e) { 
-      setConnectionStatus('Failed');
-      alert("Connection failed: " + e.message); 
-    }
-  };
+      setIsWatching(true);
+    } catch (e) { alert("Join failed: " + e.message); }
+    };
 
   if (!isAuthorized) {
     return (
@@ -250,46 +219,26 @@ export default function Home() {
         ) : activeTab === 'stream' ? (
           <div style={styles.shareContainer}>
             <div style={styles.settingsCard}>
-              <h2 style={styles.sectionTitle}>Stream Settings</h2>
-              <div style={styles.settingRow}>
-                <label>Resolution</label>
-                <select value={res} onChange={(e) => setRes(e.target.value)} style={styles.select}>
-                  <option value="720">720p (HD)</option>
-                  <option value="1080">1080p (Full HD)</option>
-                  <option value="2160">4K (Ultra HD)</option>
-                </select>
-              </div>
-              <div style={styles.settingRow}>
-                <label>FPS</label>
-                <select value={fps} onChange={(e) => setFps(e.target.value)} style={styles.select}>
-                  <option value="30">30 FPS</option>
-                  <option value="60">60 FPS</option>
-                </select>
-              </div>
-              <div style={styles.settingRow}>
-                <label>Include Audio</label>
-                <input type="checkbox" checked={withAudio} onChange={(e) => setWithAudio(e.target.checked)} style={styles.checkbox} />
-              </div>
-              <button onClick={startStreaming} style={styles.startBtn}>🚀 Go Live</button>
-              {peerId && <div style={styles.peerInfo}>Your Stream ID: <code style={styles.peerCode}>{peerId}</code></div>}
+              <h2 style={styles.sectionTitle}>Broadcaster</h2>
+              <p style={styles.streamSubtitle}>Start your high-def stream for your vault members.</p>
+              <button onClick={startStreaming} style={styles.startBtn}>🚀 Go Live Now</button>
+              {isStreaming && <div style={styles.peerInfo}>Status: <span style={{color: '#22c55e'}}>Live & Broadcasting</span></div>}
             </div>
             <div style={styles.previewBox}>
-              <span style={styles.previewLabel}>Local Preview</span>
+              <span style={styles.previewLabel}>Stream Preview</span>
               <video ref={myVideoRef} autoPlay muted style={styles.videoElement} />
             </div>
           </div>
         ) : (
           <div style={styles.watchContainer}>
             <div style={styles.watchCard}>
-              <h2 style={styles.sectionTitle}>Join Stream</h2>
-              <div style={styles.inputGroup}>
-                <input type="text" placeholder="Enter Streamer Peer ID" style={styles.input} value={remotePeerId} onChange={(e) => setRemotePeerId(e.target.value)} />
-                <button onClick={joinStream} style={styles.joinBtn}>Connect</button>
-              </div>
-              <div style={styles.statusText}>Status: <span style={{color: connectionStatus === 'Connected' ? '#22c55e' : '#888'}}>{connectionStatus}</span></div>
+              <h2 style={styles.sectionTitle}>Viewer Portal</h2>
+              <p style={styles.streamSubtitle}>Connect to the live stream broadcast.</p>
+              <button onClick={joinStream} style={styles.joinBtn}>Connect to Stream</button>
+              {isWatching && <div style={styles.peerInfo}>Status: <span style={{color: '#22c55e'}}>Viewing Live</span></div>}
             </div>
             <div style={styles.videoBox}>
-              <span style={styles.videoLabel}>Remote Broadcast</span>
+              <span style={styles.videoLabel}>Live Broadcast</span>
               <video ref={remoteVideoRef} autoPlay style={styles.videoElement} />
             </div>
           </div>
@@ -383,10 +332,8 @@ const styles = {
   shareContainer: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem' },
   settingsCard: { background: '#0a0a0a', padding: '2rem', borderRadius: '16px', border: '1px solid #222', width: '100%', maxWidth: '400px', textAlign: 'center' },
   sectionTitle: { color: '#fff', fontSize: '1.2rem', marginBottom: '1.5rem', fontWeight: '600' },
-  settingRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', color: '#888', fontSize: '0.9rem' },
-  select: { background: '#111', color: '#fff', border: '1px solid #333', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' },
-  checkbox: { width: '18px', height: '18px', cursor: 'pointer' },
-  startBtn: { width: '100%', padding: '0.8rem', borderRadius: '8px', border: 'none', background: '#fff', color: '#000', fontWeight: 'bold', cursor: 'pointer', marginTop: '1rem' },
+  streamSubtitle: { color: '#666', fontSize: '0.8rem', marginBottom: '1.5rem' },
+  startBtn: { width: '100%', padding: '0.8rem', borderRadius: '8px', border: 'none', background: '#fff', color: '#000', fontWeight: 'bold', cursor: 'pointer' },
   peerInfo: { marginTop: '1rem', fontSize: '0.8rem', color: '#666' },
   peerCode: { color: '#3b82f6', fontWeight: 'bold' },
   previewBox: { width: '100%', maxWidth: '800px', marginTop: '2rem', background: '#000', borderRadius: '12px', border: '1px solid #222', overflow: 'hidden' },
@@ -398,5 +345,4 @@ const styles = {
   joinBtn: { padding: '0.8rem 1.5rem', borderRadius: '8px', border: 'none', background: '#fff', color: '#000', fontWeight: 'bold', cursor: 'pointer' },
   videoBox: { width: '100%', maxWidth: '1000px', background: '#000', borderRadius: '16px', border: '1px solid #222', overflow: 'hidden' },
   videoLabel: { display: 'block', padding: '0.5rem', fontSize: '0.7rem', color: '#444', textAlign: 'center', borderBottom: '1px solid #222' },
-  statusText: { marginTop: '1rem', fontSize: '0.8rem', color: '#666' },
 };
