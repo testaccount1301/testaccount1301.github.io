@@ -109,21 +109,25 @@ export default function Home() {
   };
 
   const createPeer = (stream = null) => {
+    console.log("🛠️ Creating Peer Connection...");
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
 
     if (stream) {
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      console.log("🎥 Tracks added to PeerConnection");
     }
 
     pc.onicecandidate = (event) => {
-      if (event.candidate && socketRef.current) {
+      if (event.candidate) {
+        console.log("❄️ ICE Candidate found, sending to peer...");
         socketRef.current.emit('signal', { room: roomCode, signal: { candidate: event.candidate } });
       }
     };
 
     pc.ontrack = (event) => {
+      console.log("✅ Remote Track received!");
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = event.streams[0];
         setConnectionStatus('Connected');
@@ -137,8 +141,6 @@ export default function Home() {
     try {
       setConnectionStatus('Initializing...');
       const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
-      
-      // FIX: Forced websocket to stop Ngrok hang
       socketRef.current = io(serverUrl, { transports: ['websocket'] });
 
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
@@ -152,19 +154,24 @@ export default function Home() {
       socketRef.current.emit('join-room', code);
 
       socketRef.current.on('signal', async (data) => {
+        console.log("📡 Received signal from peer:", data.signal.type || "candidate");
         if (data.signal.sdp) {
           await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
           if (data.signal.type === 'offer') {
+            console.log("📩 Offer received, creating answer...");
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
           }
         } else if (data.signal.candidate) {
-          await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+          } catch (e) { console.error("❌ ICE Candidate error:", e); }
         }
       });
 
       setConnectionStatus('Live');
+      console.log("🚀 Broadcaster is Live");
     } catch (e) { alert("Stream failed: " + e.message); }
   };
 
@@ -182,24 +189,30 @@ export default function Home() {
       const pc = createPeer();
       peerConnection.current = pc;
 
+      console.log("📤 Creating offer to start connection...");
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
 
       socketRef.current.on('signal', async (data) => {
+        console.log("📡 Received signal from broadcaster:", data.signal.type || "candidate");
         if (data.signal.sdp) {
           await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
           if (data.signal.type === 'offer') {
+            console.log("📩 Offer received, creating answer...");
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
           }
         } else if (data.signal.candidate) {
-          await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+          } catch (e) { console.error("❌ ICE Candidate error:", e); }
         }
       });
 
       setConnectionStatus('Connected');
+      console.log("✅ Viewer Connected");
     } catch (e) { alert("Join failed: " + e.message); }
   };
 
