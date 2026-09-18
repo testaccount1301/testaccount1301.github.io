@@ -9,6 +9,7 @@ export default function Home() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [spotifyToken, setSpotifyToken] = useState(null);
+  const [track, setTrack] = useState(null); // Current song info
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -18,6 +19,32 @@ export default function Home() {
       window.history.replaceState({}, document.title, "/");
     }
   }, []);
+
+  // Poll Spotify every 3 seconds to update song info and timer
+  useEffect(() => {
+    if (!spotifyToken) return;
+    const updatePlayer = async () => {
+      try {
+        const res = await fetch(`/api/spotify/callback?token=${spotifyToken}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.item) {
+            setTrack({
+              name: data.item.name,
+              artist: data.item.artists[0].name,
+              image: data.item.album.images[0].url,
+              progress: data.progress_ms,
+              duration: data.item.duration_ms,
+              is_playing: data.is_playing,
+              volume: data.device?.volume_percent || 50
+            });
+          }
+        }
+      } catch (e) { console.error("Spotify sync error"); }
+    };
+    const interval = setInterval(updatePlayer, 3000);
+    return () => clearInterval(interval);
+  }, [spotifyToken]);
 
   const fetchFiles = async (path = '') => {
     setLoading(true);
@@ -57,27 +84,26 @@ export default function Home() {
       const a = document.createElement('a');
       a.href = url; a.download = filePath.split('/').pop();
       document.body.appendChild(a); a.click(); a.remove();
-    } catch (err) {
-      alert(err.message);
-    } finally {
+    } catch (err) { alert(err.message); } finally {
       setIsDownloading(false);
       setTimeout(() => setDownloadProgress(0), 2000);
     }
   };
 
   const controlSpotify = async (action) => {
-    // Changed from /api/spotify to /api/spotify/callback
     await fetch(`/api/spotify/callback?action=${action}&token=${spotifyToken}`);
+    // Manually trigger a refresh so the UI updates immediately
+    const res = await fetch(`/api/spotify/callback?token=${spotifyToken}`);
+    const data = await res.json();
+    if (data.item) setTrack({ ...data, is_playing: data.is_playing });
   };
 
-   const connectSpotify = () => {
-    // We use the NEXT_PUBLIC_ prefix so the browser can see the ID
-    const clientID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID; 
+  const connectSpotify = () => {
+    const clientID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID;
     const scope = 'user-modify-playback-state user-read-playback-state';
     const url = `https://accounts.spotify.com/authorize?client_id=${clientID}&response_type=code&redirect_uri=https://testaccount1301githubio.vercel.app/api/spotify/callback&scope=${scope}`;
     window.location.href = url;
   };
-
 
   if (!isAuthorized) {
     return (
@@ -106,7 +132,7 @@ export default function Home() {
 
         {isDownloading && (
           <div style={styles.progressWrapper}>
-            <div style={styles.progressText}>Downloading... {downloadProgress}%</div>
+            <div style={styles.progressText}>Downloading asset... {downloadProgress}%</div>
             <div style={styles.progressBarBg}><div style={{ ...styles.progressBarFill, width: `${downloadProgress}%` }}></div></div>
           </div>
         )}
@@ -134,19 +160,46 @@ export default function Home() {
         )}
       </div>
 
-      {/* FLOATING MUSIC BAR */}
+      {/* ADVANCED MUSIC BAR */}
       <div style={styles.musicBar}>
         {!spotifyToken ? (
           <button onClick={connectSpotify} style={styles.connectBtn}>Connect Spotify</button>
+        ) : !track ? (
+          <div style={styles.musicLabel}>No Active Device</div>
         ) : (
-          <div style={styles.controls}>
-            <span style={styles.musicLabel}>Spotify Active</span>
-            <div style={styles.btnGroup}>
-              <button onClick={() => controlSpotify('pause')} style={styles.musicBtn}>⏸</button>
-              <button onClick={() => controlSpotify('next')} style={styles.musicBtn}>⏭</button>
-              <button onClick={() => controlSpotify('play')} style={styles.musicBtn}>▶</button>
+          <>
+            <div style={styles.trackInfo}>
+              <img src={track.image} style={styles.albumArt} alt="Album Art" />
+              <div style={styles.trackText}>
+                <div style={styles.songName}>{track.name}</div>
+                <div style={styles.artistName}>{track.artist}</div>
+              </div>
             </div>
-          </div>
+            <div style={styles.playerControls}>
+              <div style={styles.btnGroup}>
+                <button onClick={() => controlSpotify('prev')} style={styles.musicBtn}>⏮</button>
+                <button onClick={() => controlSpotify(track.is_playing ? 'pause' : 'play')} style={styles.playBtn}>
+                  {track.is_playing ? '⏸' : '▶'}
+                </button>
+                <button onClick={() => controlSpotify('next')} style={styles.musicBtn}>⏭</button>
+              </div>
+              <div style={styles.volumeGroup}>
+                <span style={styles.volIcon}>🔊</span>
+                <input 
+                  type="range" min="0" max="100" 
+                  value={track.volume || 0} 
+                  onChange={(e) => controlSpotify(`volume&volume=${e.target.value}`)}
+                  style={styles.volSlider} 
+                />
+              </div>
+            </div>
+            <div style={styles.timerGroup}>
+               <div style={styles.timerText}>{Math.floor(track.progress / 60000)}:{(Math.floor((track.progress % 60000) / 1000)).toString().padStart(2, '0')}</div>
+               <div style={styles.progressMiniBg}>
+                  <div style={{...styles.progressMiniFill, width: `${(track.progress / track.duration) * 100}%`}}></div>
+               </div>
+            </div>
+          </>
         )}
       </div>
     </main>
@@ -154,7 +207,7 @@ export default function Home() {
 }
 
 const styles = {
-  main: { padding: '3rem 1rem', fontFamily: '"Inter", sans-serif', backgroundColor: '#050505', minHeight: '100vh', color: '#eee', paddingBottom: '100px' },
+  main: { padding: '3rem 1rem', fontFamily: '"Inter", sans-serif', backgroundColor: '#050505', minHeight: '100vh', color: '#eee', paddingBottom: '120px' },
   container: { maxWidth: '1000px', margin: '0 auto' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3rem', borderBottom: '1px solid #111', paddingBottom: '1.5rem' },
   titleGroup: { display: 'flex', flexDirection: 'column', gap: '0.4rem' },
@@ -180,10 +233,22 @@ const styles = {
   cardFooter: { textAlign: 'right', borderTop: '1px solid #111', paddingTop: '0.8rem' },
   actionBtn: { background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '0.8rem', fontWeight: '500' },
   loading: { textAlign: 'center', color: '#333', fontSize: '0.9rem', marginTop: '4rem' },
-  musicBar: { position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)', padding: '10px 20px', background: 'rgba(10, 10, 10, 0.8)', backdropFilter: 'blur(10px)', borderRadius: '40px', border: '1px solid #222', display: 'flex', alignItems: 'center', gap: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' },
-  connectBtn: { background: '#1db954', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem' },
-  controls: { display: 'flex', alignItems: 'center', gap: '15px' },
-  musicLabel: { color: '#1db954', fontSize: '0.7rem', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' },
-  btnGroup: { display: 'flex', gap: '10px' },
-  musicBtn: { background: 'transparent', border: '1px solid #333', color: 'white', borderRadius: '50%', width: '30px', height: '30px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem' },
+  musicBar: { position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)', padding: '12px 24px', background: 'rgba(10, 10, 10, 0.9)', backdropFilter: 'blur(20px)', borderRadius: '100px', border: '1px solid #222', display: 'flex', alignItems: 'center', gap: '25px', boxShadow: '0 15px 40px rgba(0,0,0,0.6)', zIndex: 1000 },
+  connectBtn: { background: '#1db954', color: 'white', border: 'none', padding: '8px 20px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem' },
+  trackInfo: { display: 'flex', alignItems: 'center', gap: '12px', width: '180px' },
+  albumArt: { width: '40px', height: '40px', borderRadius: '4px', objectFit: 'cover' },
+  trackText: { overflow: 'hidden', whiteSpace: 'nowrap' },
+  songName: { fontSize: '0.8rem', fontWeight: 'bold', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis' },
+  artistName: { fontSize: '0.7rem', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis' },
+  playerControls: { display: 'flex', alignItems: 'center', gap: '20px' },
+  btnGroup: { display: 'flex', alignItems: 'center', gap: '12px' },
+  musicBtn: { background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', fontSize: '1rem', padding: '5px' },
+  playBtn: { background: '#fff', color: '#000', border: 'none', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  volumeGroup: { display: 'flex', alignItems: 'center', gap: '8px' },
+  volIcon: { color: '#555', fontSize: '0.8rem' },
+  volSlider: { width: '70px', accentColor: '#fff', cursor: 'pointer' },
+  timerGroup: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', width: '60px' },
+  timerText: { fontSize: '0.65rem', color: '#555', marginBottom: '4px', fontFamily: 'monospace' },
+  progressMiniBg: { height: '3px', width: '100%', background: '#222', borderRadius: '2px', overflow: 'hidden' },
+  progressMiniFill: { height: '100%', background: '#1db954' },
 };
