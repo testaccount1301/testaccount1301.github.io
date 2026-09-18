@@ -4,7 +4,7 @@ export default function Home() {
   // AUTH & UI STATE
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
-  const [activeTab, setActiveTab] = useState('files'); // 'files' or 'screen'
+  const [activeTab, setActiveTab] = useState('files'); // 'files', 'stream', 'watch'
   
   // FILE EXPLORER STATE
   const [currentPath, setCurrentPath] = useState('');
@@ -19,8 +19,15 @@ export default function Home() {
 
   // SCREEN SHARE STATE
   const [peerId, setPeerId] = useState('');
+  const [remotePeerId, setRemotePeerId] = useState('');
   const [remoteStream, setRemoteStream] = useState(null);
   const [isSharing, setIsSharing] = useState(false);
+  
+  // STREAM SETTINGS
+  const [res, setRes] = useState('1080'); // 720, 1080, 2160
+  const [fps, setFps] = useState('60');   // 30, 60
+  const [withAudio, setWithAudio] = useState(true);
+
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
 
@@ -111,8 +118,9 @@ export default function Home() {
     window.location.href = url;
   };
 
+  // P2P CORE LOGIC
   useEffect(() => {
-    if (activeTab !== 'screen') return;
+    if (activeTab === 'files') return;
     const script = document.createElement('script');
     script.src = "https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js";
     script.async = true;
@@ -123,27 +131,43 @@ export default function Home() {
         call.answer();
         call.on('stream', (remoteStream) => {
           setRemoteStream(remoteStream);
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
         });
       });
     };
     document.body.appendChild(script);
   }, [activeTab]);
 
-  const startScreenShare = async () => {
+  const startStreaming = async () => {
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const constraints = {
+        video: { 
+          width: { ideal: res === '1080' ? 1920 : res === '2160' ? 3840 : 1280 },
+          height: { ideal: res === '1080' ? 1080 : res === '2160' ? 2160 : 720 },
+          frameRate: { ideal: parseInt(fps) }
+        },
+        audio: withAudio
+      };
+      const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
       if (myVideoRef.current) myVideoRef.current.srcObject = stream;
       setIsSharing(true);
-      const peer = new window.Peer();
-      peer.on('open', (id) => {
-        alert("Your Peer ID: " + id + "\nShare this ID with the viewer!");
+      
+      // Use the global peer instance (handled by PeerJS script)
+      const peer = new window.Peer(); 
+      // In a production environment, you would maintain one Peer instance.
+    } catch (e) { alert("Screen capture failed: " + e.message); }
+  };
+
+  const joinStream = async () => {
+    if (!remotePeerId) return alert("Enter a Peer ID");
+    const peer = new window.Peer();
+    peer.on('open', (id) => {
+      const call = peer.call(remotePeerId, new MediaStream()); // Call with dummy stream to trigger answer
+      call.on('stream', (remoteStream) => {
+        setRemoteStream(remoteStream);
+        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
       });
-      const urlParams = new URLSearchParams(window.location.search);
-      const remoteId = urlParams.get('peer');
-      if (remoteId) {
-        const call = peer.call(remoteId, stream);
-      }
-    } catch (e) { alert("Screen share denied"); }
+    });
   };
 
   if (!isAuthorized) {
@@ -163,7 +187,8 @@ export default function Home() {
       <nav style={styles.nav}>
         <div style={styles.navLinks}>
           <button onClick={() => setActiveTab('files')} style={{...styles.tabBtn, color: activeTab === 'files' ? '#fff' : '#666', borderBottom: activeTab === 'files' ? '2px solid #fff' : 'none'}}>📁 Vault</button>
-          <button onClick={() => setActiveTab('screen')} style={{...styles.tabBtn, color: activeTab === 'screen' ? '#fff' : '#666', borderBottom: activeTab === 'screen' ? '2px solid #fff' : 'none'}}>📺 Live Share</button>
+          <button onClick={() => setActiveTab('stream')} style={{...styles.tabBtn, color: activeTab === 'stream' ? '#fff' : '#666', borderBottom: activeTab === 'stream' ? '2px solid #fff' : 'none'}}>📡 Stream</button>
+          <button onClick={() => setActiveTab('watch')} style={{...styles.tabBtn, color: activeTab === 'watch' ? '#fff' : '#666', borderBottom: activeTab === 'watch' ? '2px solid #fff' : 'none'}}>📺 Watch</button>
         </div>
       </nav>
 
@@ -204,25 +229,49 @@ export default function Home() {
               </div>
             )}
           </>
+        ) : activeTab === 'stream' ? (
+          <div style={styles.shareContainer}>
+            <div style={styles.settingsCard}>
+              <h2 style={styles.sectionTitle}>Stream Settings</h2>
+              <div style={styles.settingRow}>
+                <label>Resolution</label>
+                <select value={res} onChange={(e) => setRes(e.target.value)} style={styles.select}>
+                  <option value="720">720p (HD)</option>
+                  <option value="1080">1080p (Full HD)</option>
+                  <option value="2160">4K (Ultra HD)</option>
+                </select>
+              </div>
+              <div style={styles.settingRow}>
+                <label>FPS</label>
+                <select value={fps} onChange={(e) => setFps(e.target.value)} style={styles.select}>
+                  <option value="30">30 FPS</option>
+                  <option value="60">60 FPS</option>
+                </select>
+              </div>
+              <div style={styles.settingRow}>
+                <label>Include Audio</label>
+                <input type="checkbox" checked={withAudio} onChange={(e) => setWithAudio(e.target.checked)} style={styles.checkbox} />
+              </div>
+              <button onClick={startStreaming} style={styles.startBtn}>🚀 Go Live</button>
+              {peerId && <div style={styles.peerInfo}>Your Stream ID: <code style={styles.peerCode}>{peerId}</code></div>}
+            </div>
+            <div style={styles.previewBox}>
+              <span style={styles.previewLabel}>Local Preview</span>
+              <video ref={myVideoRef} autoPlay muted style={styles.videoElement} />
+            </div>
+          </div>
         ) : (
-          <div style={styles.screenShareContainer}>
-            <div style={styles.screenHeader}>
-              <h2 style={styles.screenTitle}>Live Screen Sharing</h2>
-              <p style={styles.screenSubtitle}>Share your screen in real-time via a secure P2P link.</p>
-            </div>
-            <div style={styles.screenControls}>
-              <button onClick={startScreenShare} style={styles.shareBtn}>Start Sharing Screen</button>
-              {peerId && <div style={styles.peerInfo}>Your ID: <code style={styles.peerCode}>{peerId}</code></div>}
-            </div>
-            <div style={styles.videoGrid}>
-              <div style={styles.videoBox}>
-                <span style={styles.videoLabel}>Your Stream</span>
-                <video ref={myVideoRef} autoPlay muted style={styles.videoElement} />
+          <div style={styles.watchContainer}>
+            <div style={styles.watchCard}>
+              <h2 style={styles.sectionTitle}>Join Stream</h2>
+              <div style={styles.inputGroup}>
+                <input type="text" placeholder="Enter Streamer Peer ID" style={styles.input} value={remotePeerId} onChange={(e) => setRemotePeerId(e.target.value)} />
+                <button onClick={joinStream} style={styles.joinBtn}>Connect</button>
               </div>
-              <div style={styles.videoBox}>
-                <span style={styles.videoLabel}>Remote Stream</span>
-                <video ref={remoteVideoRef} autoPlay style={styles.videoElement} />
-              </div>
+            </div>
+            <div style={styles.videoBox}>
+              <span style={styles.videoLabel}>Remote Broadcast</span>
+              <video ref={remoteVideoRef} autoPlay style={styles.videoElement} />
             </div>
           </div>
         )}
@@ -267,8 +316,8 @@ export default function Home() {
 const styles = {
   main: { padding: '3rem 1rem', fontFamily: '"Inter", sans-serif', backgroundColor: '#050505', minHeight: '100vh', color: '#eee', paddingBottom: '120px' },
   nav: { display: 'flex', justifyContent: 'center', marginBottom: '3rem' },
-  navLinks: { display: 'flex', gap: '2rem', background: '#111', padding: '0.5rem', borderRadius: '12px', border: '1px solid #222' },
-  tabBtn: { background: 'transparent', border: 'none', padding: '0.6rem 1.5rem', cursor: 'pointer', fontSize: '0.9rem', fontWeight: '500', transition: '0.2s' },
+  navLinks: { display: 'flex', gap: '1rem', background: '#111', padding: '0.4rem', borderRadius: '12px', border: '1px solid #222' },
+  tabBtn: { background: 'transparent', border: 'none', padding: '0.6rem 1.2rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '500', transition: '0.2s' },
   container: { maxWidth: '1100px', margin: '0 auto' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3rem', borderBottom: '1px solid #111', paddingBottom: '1.5rem' },
   titleGroup: { display: 'flex', flexDirection: 'column', gap: '0.4rem' },
@@ -312,16 +361,22 @@ const styles = {
   timerText: { fontSize: '0.65rem', color: '#555', marginBottom: '4px', fontFamily: 'monospace' },
   progressMiniBg: { height: '3px', width: '100%', background: '#222', borderRadius: '2px', overflow: 'hidden' },
   progressMiniFill: { height: '100%', background: '#1db954' },
-  screenShareContainer: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem' },
-  screenHeader: { textAlign: 'center' },
-  screenTitle: { fontSize: '2rem', fontWeight: '700', color: '#fff', margin: 0 },
-  screenSubtitle: { color: '#666', fontSize: '0.9rem' },
-  screenControls: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' },
-  shareBtn: { padding: '1rem 2rem', borderRadius: '12px', border: 'none', background: '#fff', color: '#000', fontWeight: 'bold', cursor: 'pointer', fontSize: '1rem' },
-  peerInfo: { fontSize: '0.85rem', color: '#888' },
+  shareContainer: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem' },
+  settingsCard: { background: '#0a0a0a', padding: '2rem', borderRadius: '16px', border: '1px solid #222', width: '100%', maxWidth: '400px', textAlign: 'center' },
+  sectionTitle: { color: '#fff', fontSize: '1.2rem', marginBottom: '1.5rem', fontWeight: '600' },
+  settingRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', color: '#888', fontSize: '0.9rem' },
+  select: { background: '#111', color: '#fff', border: '1px solid #333', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' },
+  checkbox: { width: '18px', height: '18px', cursor: 'pointer' },
+  startBtn: { width: '100%', padding: '0.8rem', borderRadius: '8px', border: 'none', background: '#fff', color: '#000', fontWeight: 'bold', cursor: 'pointer', marginTop: '1rem' },
+  peerInfo: { marginTop: '1rem', fontSize: '0.8rem', color: '#666' },
   peerCode: { color: '#3b82f6', fontWeight: 'bold' },
-  videoGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '2rem', width: '100%', marginTop: '2rem' },
-  videoBox: { background: '#111', borderRadius: '16px', border: '1px solid #222', overflow: 'hidden', display: 'flex', flexDirection: 'column' },
-  videoLabel: { padding: '0.5rem', fontSize: '0.7rem', color: '#555', textAlign: 'center', borderBottom: '1px solid #222' },
-  videoElement: { width: '100%', height: 'auto', backgroundColor: '#000' },
+  previewBox: { width: '100%', maxWidth: '800px', marginTop: '2rem', background: '#000', borderRadius: '12px', border: '1px solid #222', overflow: 'hidden' },
+  previewLabel: { display: 'block', padding: '0.5rem', fontSize: '0.7rem', color: '#444', textAlign: 'center' },
+  videoElement: { width: '100%', height: 'auto', display: 'block' },
+  watchContainer: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem' },
+  watchCard: { background: '#0a0a0a', padding: '2rem', borderRadius: '16px', border: '1px solid #222', width: '100%', maxWidth: '500px', textAlign: 'center' },
+  inputGroup: { display: 'flex', gap: '10px', marginTop: '1rem' },
+  joinBtn: { padding: '0.8rem 1.5rem', borderRadius: '8px', border: 'none', background: '#fff', color: '#000', fontWeight: 'bold', cursor: 'pointer' },
+  videoBox: { width: '100%', maxWidth: '1000px', background: '#000', borderRadius: '16px', border: '1px solid #222', overflow: 'hidden' },
+  videoLabel: { display: 'block', padding: '0.5rem', fontSize: '0.7rem', color: '#444', textAlign: 'center', borderBottom: '1px solid #222' },
 };
