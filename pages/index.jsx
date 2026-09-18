@@ -13,7 +13,6 @@ export default function Home() {
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
   const [roomCode, setRoomCode] = useState(''); 
-  const [inputCode, setInputCode] = useState(''); 
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   
   const myVideoRef = useRef(null);
@@ -21,12 +20,21 @@ export default function Home() {
   const socketRef = useRef(null);
   const peerConnection = useRef(null);
 
+  // 1. HANDLE INITIAL LOAD (Spotify & Auto-Join Room)
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
+    
+    // Spotify Token
     const token = urlParams.get('spotify_token');
     if (token) {
       setSpotifyToken(token);
-      window.history.replaceState({}, document.title, "/");
+    }
+
+    // AUTO-JOIN ROOM via Link
+    const room = urlParams.get('room');
+    if (room) {
+      setActiveTab('watch');
+      joinStream(room);
     }
   }, []);
 
@@ -124,16 +132,14 @@ export default function Home() {
     };
 
     pc.ontrack = async (event) => {
-      console.log("✅ Remote Track received! Attempting to play...");
+      console.log("✅ Remote Track received!");
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = event.streams[0];
         try {
-          // FORCE PLAY: Bypasses most browser blocks
-          await remoteVideoRef.current.play(); 
+          await remoteVideoRef.current.play();
           setConnectionStatus('Connected');
         } catch (e) {
-          console.error("Playback failed, but track is here:", e);
-          setConnectionStatus('Connected (Muted/Blocked)');
+          setConnectionStatus('Connected (Blocked)');
         }
       }
     };
@@ -177,17 +183,17 @@ export default function Home() {
     } catch (e) { alert("Stream failed: " + e.message); }
   };
 
-  const joinStream = async () => {
-    if (inputCode.length !== 5) return alert("Enter 5-digit code");
-    setConnectionStatus('Connecting...');
+  const joinStream = async (codeFromUrl = null) => {
+    const code = codeFromUrl || roomCode;
+    if (!code || code.length !== 5) return;
     
+    setConnectionStatus('Connecting...');
     try {
       if (socketRef.current) { socketRef.current.off('signal'); socketRef.current.disconnect(); }
       if (peerConnection.current) peerConnection.current.close();
 
       const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
       socketRef.current = io(serverUrl, { transports: ['websocket'] });
-      const code = inputCode;
       setRoomCode(code);
       socketRef.current.emit('join-room', code);
 
@@ -209,7 +215,7 @@ export default function Home() {
       });
 
       setConnectionStatus('Connected');
-    } catch (e) { alert("Join failed: " + e.message); }
+    } catch (e) { console.error("Join failed:", e); }
   };
 
   if (!isAuthorized) {
@@ -277,7 +283,12 @@ export default function Home() {
               <h2 style={styles.sectionTitle}>Broadcaster</h2>
               <p style={styles.streamSubtitle}>Start a secure P2P broadcast from your PC.</p>
               <button onClick={startStreaming} style={styles.startBtn}>🚀 Go Live Now</button>
-              {roomCode && <div style={styles.peerInfo}>Your Code: <code style={styles.peerCode}>{roomCode}</code></div>}
+              {roomCode && (
+                <div style={styles.peerInfo}>
+                  Share this link: <br/>
+                  <code style={styles.peerCode}>{`${window.location.origin}/?room=${roomCode}`}</code>
+                </div>
+              )}
             </div>
             <div style={styles.previewBox}>
               <span style={styles.previewLabel}>Local Preview</span>
@@ -290,13 +301,12 @@ export default function Home() {
               <h2 style={styles.sectionTitle}>Viewer Portal</h2>
               <div style={styles.inputGroup}>
                 <input type="text" placeholder="Enter 5-digit code" style={styles.input} value={inputCode} onChange={(e) => setInputCode(e.target.value)} />
-                <button onClick={joinStream} style={styles.joinBtn}>Connect</button>
+                <button onClick={() => joinStream(inputCode)} style={styles.joinBtn}>Connect</button>
               </div>
               <div style={styles.statusText}>Status: <span style={{color: connectionStatus === 'Connected' ? '#22c55e' : '#888'}}>{connectionStatus}</span></div>
             </div>
             <div style={styles.videoBox}>
               <span style={styles.videoLabel}>Live Broadcast</span>
-              {/* FIXED: added muted and forced minimum height via styles */}
               <video ref={remoteVideoRef} autoPlay playsInline muted style={styles.videoElement} />
             </div>
           </div>
