@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef }, { useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
 export default function Home() {
@@ -86,7 +86,9 @@ export default function Home() {
         if (done) break;
         chunks.push(value);
         receivedLength += value.length;
-        if (contentLength) setDownloadProgress(Math.round((receivedLength / contentLength) * 100));
+        if (contentLength) {
+          setDownloadProgress(Math.round((receivedLength / contentLength) * 100));
+        }
       }
       const blob = new Blob(chunks);
       const url = window.URL.createObjectURL(blob);
@@ -181,7 +183,7 @@ export default function Home() {
         <form onSubmit={(e) => { e.preventDefault(); setIsAuthorized(true); fetchFiles(''); }} style={styles.authCard}>
           <h2 style={styles.authTitle}>Vault Access</h2>
           <input type="password" placeholder="Enter Access Key" style={styles.input} value={password} onChange={(e) => setPassword(e.target.value)} />
-          <button style={styles.button}>Unlock</button>
+          <button type="submit" style={styles.button}>Unlock</button>
         </form>
       </div>
     );
