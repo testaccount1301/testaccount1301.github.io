@@ -66,7 +66,8 @@ export default function Home() {
   };
 
   const controlSpotify = async (action) => {
-    await fetch(`/api/spotify?action=${action}&token=${spotifyToken}`);
+    // Changed from /api/spotify to /api/spotify/callback
+    await fetch(`/api/spotify/callback?action=${action}&token=${spotifyToken}`);
   };
 
    const connectSpotify = () => {
