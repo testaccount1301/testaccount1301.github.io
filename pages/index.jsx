@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef }, { useCallback } from 'react';
 import { io } from 'socket.io-client';
 
 export default function Home() {
@@ -15,6 +15,7 @@ export default function Home() {
   const [roomCode, setRoomCode] = useState(''); 
   const [inputCode, setInputCode] = useState(''); 
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
+  
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const socketRef = useRef(null);
@@ -38,9 +39,12 @@ export default function Home() {
           const data = await res.json();
           if (data.item) {
             setTrack({
-              name: data.item.name, artist: data.item.artists[0].name,
-              image: data.item.album.images[0].url, progress: data.progress_ms,
-              duration: data.item.duration_ms, is_playing: data.is_playing,
+              name: data.item.name, 
+              artist: data.item.artists[0].name,
+              image: data.item.album.images[0].url, 
+              progress: data.progress_ms,
+              duration: data.item.duration_ms, 
+              is_playing: data.is_playing,
               volume: data.device?.volume_percent || 50
             });
           }
@@ -104,90 +108,71 @@ export default function Home() {
     const clientID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID;
     const scope = 'user-modify-playback-state user-read-playback-state';
     const url = `https://accounts.spotify.com/authorize?client_id=${clientID}&response_type=code&redirect_uri=https://testaccount1301githubio.vercel.app/api/spotify/callback&scope=${scope}`;
-    window.location.href = url,
+    window.location.href = url;
   };
 
-  // WEBRTC CORE
-  const initPeer = () => {
+  const setupPeer = async (isStreamer) => {
     const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
     if(!serverUrl) return alert("Server URL not set in Vercel!");
-    
+
     socketRef.current = io(serverUrl);
+
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    if (myVideoRef.current) myVideoRef.current.srcObject = stream;
+
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
     peerConnection.current = pc;
-    return pc;
-  };
 
-  const startStreaming = async () => {
-    try {
-      setConnectionStatus('Initializing...');
-      const pc = initPeer();
-      
-      // ONLY the streamer requests the screen
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-      if (myVideoRef.current) myVideoRef.current.srcObject = stream;
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socketRef.current.emit('signal', { room: roomCode, signal: { candidate: event.candidate } });
+      }
+    };
+
+    if (isStreamer) {
       const code = Math.floor(10000 + Math.random() * 90000).toString();
       setRoomCode(code);
       socketRef.current.emit('join-room', code);
+    }
 
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socketRef.current.emit('signal', { room: code, signal: { candidate: event.candidate } });
+    socketRef.current.on('signal', async (data) => {
+      if (data.signal.sdp) {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
+        if (data.signal.type === 'offer') {
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socketRef.current.emit('signal', { room: roomCode, signal: pc.localDescription });
         }
-      };
+      } else if (data.signal.candidate) {
+        await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+      }
+    });
 
-      socketRef.current.on('signal', async (data) => {
-        if (data.signal.sdp) {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
-          if (data.signal.type === 'offer') {
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
-          }
-        } else if (data.signal.candidate) {
-          await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
-        }
-      });
+    pc.ontrack = (event) => {
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
+      setConnectionStatus('Connected');
+    };
+  };
 
-      setConnectionStatus('Live');
-    } catch (e) { alert("Stream failed: " + e.message); }
+  const startStreaming = async () => {
+    setConnectionStatus('Initializing...');
+    await setupPeer(true);
   };
 
   const joinStream = async () => {
     if (inputCode.length !== 5) return alert("Enter 5-digit code");
+    setRoomCode(inputCode);
     setConnectionStatus('Connecting...');
-    
-    try {
-      const pc = initPeer();
-      const code = inputCode;
-      socketRef.current.emit('join-room', code);
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
-
-      socketRef.current.on('signal', async (data) => {
-        if (data.signal.sdp) {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
-          if (data.signal.type === 'offer') {
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
-          }
-        } else if (data.signal.candidate) {
-          await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
-        }
-      });
-
-      pc.ontrack = (event) => {
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
-        setConnectionStatus('Connected');
-      };
-    } catch (e) { alert("Join failed: " + e.message); }
+    await setupPeer(false);
+    const pc = peerConnection.current;
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socketRef.current.emit('signal', { room: inputCode, signal: pc.localDescription });
+    socketRef.current.emit('join-room', inputCode);
   };
 
   if (!isAuthorized) {
@@ -227,7 +212,7 @@ export default function Home() {
             {isDownloading && (
               <div style={styles.progressWrapper}>
                 <div style={styles.progressText}>Downloading... {downloadProgress}%</div>
-                <div style={styles.progressBarBg}><div style={{ ...styles.progressBarFill, width: `${download, progress}%` }}></div></div>
+                <div style={styles.progressBarBg}><div style={{ ...styles.progressBarFill, width: `${downloadProgress}%` }}></div></div>
               </div>
             )}
             {loading ? <div style={styles.loading}>Loading Vault...</div> : (
@@ -317,7 +302,7 @@ export default function Home() {
 }
 
 const styles = {
-  main: { padding: '3rem 1rem', fontFamily: '"Inter", sans-serif', backgroundColor: '#050505', minHieght: '100vh', color: '#eee', paddingBottom: '120px' },
+  main: { padding: '3rem 1rem', fontFamily: '"Inter", sans-serif', backgroundColor: '#050505', minHeight: '100vh', color: '#eee', paddingBottom: '120px' },
   nav: { display: 'flex', justifyContent: 'center', marginBottom: '3rem' },
   navLinks: { display: 'flex', gap: '1rem', background: '#111', padding: '0.4rem', borderRadius: '12px', border: '1px solid #222' },
   tabBtn: { background: 'transparent', border: 'none', padding: '0.6rem 1.2rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '500', transition: '0.2s' },
