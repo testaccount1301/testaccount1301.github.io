@@ -138,7 +138,7 @@ export default function Home() {
       setConnectionStatus('Initializing...');
       const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
       
-      // FIXED: forced websocket transports for Ngrok
+      // FIX: Forced websocket to stop Ngrok hang
       socketRef.current = io(serverUrl, { transports: ['websocket'] });
 
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
