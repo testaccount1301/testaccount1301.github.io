@@ -4,18 +4,19 @@ export default async function handler(req, res) {
   const appCertificate = process.env.AGORA_APP_CERTIFICATE;
 
   if (!channelName) return res.status(400).json({ error: 'channelName required' });
+  if (!appId || !appCertificate) return res.status(500).json({ error: 'Server keys missing' });
 
   try {
-    // We use a lightweight token generator service to avoid installing heavy SDKs
-    const response = await fetch(`https://token.agora.io/token?appId=${appId}&appCertificate=${appCertificate}&channelName=${channelName}&ttl=3600`);
+    // We use the Agora token service with an explicit request for a 24-hour token
+    const response = await fetch(`https://token.agora.io/token?appId=${appId}&appCertificate=${appCertificate}&channelName=${channelName}&ttl=86400`);
     const data = await response.json();
     
     if (data.token) {
       res.status(200).json({ token: data.token });
     } else {
-      res.status(500).json({ error: 'Failed to generate token' });
+      res.status(500).json({ error: 'Agora refused to issue token' });
     }
   } catch (e) {
-    res.status(500).json({ error: 'Server Error' });
+    res.status(500).json({ error: 'Token Server Error' });
   }
 }
