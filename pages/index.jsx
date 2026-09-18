@@ -4,7 +4,7 @@ export default function Home() {
   // AUTH & UI STATE
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
-  const [activeTab, setActiveTab] = useState('files'); // 'files', 'stream', 'watch'
+  const [activeTab, setActiveTab] = useState('files'); 
   
   // FILE EXPLORER STATE
   const [currentPath, setCurrentPath] = useState('');
@@ -17,19 +17,18 @@ export default function Home() {
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
 
-  // SCREEN SHARE STATE
+  // P2P SCREEN SHARE STATE
   const [peerId, setPeerId] = useState('');
   const [remotePeerId, setRemotePeerId] = useState('');
-  const [remoteStream, setRemoteStream] = useState(null);
   const [isSharing, setIsSharing] = useState(false);
   
-  // STREAM SETTINGS
-  const [res, setRes] = useState('1080'); // 720, 1080, 2160
-  const [fps, setFps] = useState('60');   // 30, 60
+  const [res, setRes] = useState('1080'); 
+  const [fps, setFps] = useState('60');   
   const [withAudio, setWithAudio] = useState(true);
 
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const peerInstance = useRef(null); // Persistent Peer object
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -40,6 +39,7 @@ export default function Home() {
     }
   }, []);
 
+  // Spotify Sync
   useEffect(() => {
     if (!spotifyToken) return;
     const updatePlayer = async () => {
@@ -62,6 +62,7 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [spotifyToken]);
 
+  // FILE LOGIC
   const fetchFiles = async (path = '') => {
     setLoading(true);
     try {
@@ -125,18 +126,31 @@ export default function Home() {
     script.src = "https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js";
     script.async = true;
     script.onload = () => {
+      // Initialize a single persistent Peer instance
       const peer = new window.Peer();
-      peer.on('open', (id) => setPeerId(id));
+      peerInstance.current = peer;
+
+      peer.on('open', (id) => {
+        setPeerId(id);
+      });
+
+      // This is the "Handshake" - Listen for incoming calls
       peer.on('call', (call) => {
-        call.answer();
-        call.on('stream', (remoteStream) => {
-          setRemoteStream(remoteStream);
-          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
-        });
+        // If we are the streamer, answer with our screen stream
+        if (isSharing && myVideoRef.current) {
+          call.answer(myVideoRef.current.srcObject);
+        } else {
+          // Otherwise just answer with a silent stream to establish connection
+          call.answer(new MediaStream());
+        }
       });
     };
     document.body.appendChild(script);
-  }, [activeTab]);
+
+    return () => {
+      if (peerInstance.current) peerInstance.current.destroy();
+    };
+  }, [activeTab, isSharing]);
 
   const startStreaming = async () => {
     try {
@@ -151,23 +165,23 @@ export default function Home() {
       const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
       if (myVideoRef.current) myVideoRef.current.srcObject = stream;
       setIsSharing(true);
-      
-      // Use the global peer instance (handled by PeerJS script)
-      const peer = new window.Peer(); 
-      // In a production environment, you would maintain one Peer instance.
     } catch (e) { alert("Screen capture failed: " + e.message); }
   };
 
   const joinStream = async () => {
     if (!remotePeerId) return alert("Enter a Peer ID");
-    const peer = new window.Peer();
-    peer.on('open', (id) => {
-      const call = peer.call(remotePeerId, new MediaStream()); // Call with dummy stream to trigger answer
+    if (!peerInstance.current) return alert("Peer system not initialized");
+
+    try {
+      // We call the streamer. Since we aren't sending a stream, we send a dummy one.
+      const call = peerInstance.current.call(remotePeerId, new MediaStream());
+      
       call.on('stream', (remoteStream) => {
-        setRemoteStream(remoteStream);
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
+        }
       });
-    });
+    } catch (e) { alert("Connection failed: " + e.message); }
   };
 
   if (!isAuthorized) {
