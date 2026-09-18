@@ -8,18 +8,23 @@ export default function Home() {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Function to fetch files from the current path
   const fetchFiles = async (path = '') => {
     setLoading(true);
     try {
       const res = await fetch(`/api/files?path=${encodeURIComponent(path)}&password=${password}`);
-      if (!res.ok) throw new Error('Unauthorized or not found');
       const data = await res.json();
+      
+      if (!res.ok) {
+        // This will now show the EXACT error from GitHub (e.g. "Not Found" or "Bad Credentials")
+        throw new Error(data.error || 'Unknown error occurred');
+      }
+      
       setFiles(data);
       setCurrentPath(path);
     } catch (e) {
-      alert(e.message);
-      setIsAuthorized(false);
+      alert("❌ Error: " + e.message);
+      // If the error is "Wrong Password", kick them back to login
+      if (e.message.includes('Wrong Password')) setIsAuthorized(false);
     } finally {
       setLoading(false);
     }
@@ -28,7 +33,7 @@ export default function Home() {
   const handleLogin = (e) => {
     e.preventDefault();
     setIsAuthorized(true);
-    fetchFiles(''); // Load root directory
+    fetchFiles('');
   };
 
   const handleDownload = async (filePath) => {
@@ -44,7 +49,6 @@ export default function Home() {
     a.remove();
   };
 
-  // PASSWORD SCREEN
   if (!isAuthorized) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontFamily: 'sans-serif', backgroundColor: '#121212', color: 'white' }}>
@@ -63,14 +67,13 @@ export default function Home() {
     );
   }
 
-  // FILE EXPLORER SCREEN
   return (
     <main style={{ padding: '2rem', fontFamily: 'sans-serif', backgroundColor: '#f8f9fa', minHeight: '100vh' }}>
       <div style={{ maxWidth: '900px', margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
           <div>
             <h1 style={{ fontSize: '1.8rem', margin: 0 }}>📁 Repo Explorer</h1>
-            <p style={{ color: '#666' }}>Path: <code>/{currentPath}</code></p>
+            <p style={{ color: '#666' }}>Path: <code style={{background: '#eee', padding: '2px 4px'}}>{currentPath || '/ (Root)'}</code></p>
           </div>
           <button onClick={() => fetchFiles('')} style={{ padding: '0.5rem 1rem', cursor: 'pointer', borderRadius: '6px', border: '1px solid #ccc', background: 'white' }}>🏠 Root</button>
         </div>
@@ -87,10 +90,8 @@ export default function Home() {
               </thead>
               <tbody>
                 {files.map((file, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #eee', cursor: 'pointer' }}>
-                    <td style={{ padding: '1rem', color: '#333', fontWeight: file.type === 'dir' ? 'bold' : 'normal' }}>
-                      {file.name}
-                    </td>
+                  <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ padding: '1rem', color: '#333', fontWeight: file.type === 'dir' ? 'bold' : 'normal' }}>{file.name}</td>
                     <td style={{ padding: '1rem', color: '#888', fontSize: '0.9rem' }}>{file.type}</td>
                     <td style={{ padding: '1rem', textAlign: 'right' }}>
                       {file.type === 'dir' ? (
