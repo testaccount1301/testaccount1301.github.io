@@ -136,12 +136,7 @@ export default function Home() {
   const startStreaming = async () => {
     try {
       setConnectionStatus('Initializing...');
-      
-      // CLEANUP: Remove old listeners and connections
-      if (socketRef.current) {
-        socketRef.current.off('signal');
-        socketRef.current.disconnect();
-      }
+      if (socketRef.current) { socketRef.current.off('signal'); socketRef.current.disconnect(); }
       if (peerConnection.current) peerConnection.current.close();
 
       const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
@@ -159,17 +154,14 @@ export default function Home() {
 
       socketRef.current.on('signal', async (data) => {
         if (data.signal.sdp) {
-          // GUARD: Only set remote description if we aren't already stable
-          if (data.signal.type === 'offer' && pc.signalingState === 'stable') {
+          if (data.signal.type === 'offer') {
             await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
           }
         } else if (data.signal.candidate) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
-          } catch (e) {}
+          try { await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate)); } catch (e) {}
         }
       });
 
@@ -182,11 +174,7 @@ export default function Home() {
     setConnectionStatus('Connecting...');
     
     try {
-      // CLEANUP
-      if (socketRef.current) {
-        socketRef.current.off('signal');
-        socketRef.current.disconnect();
-      }
+      if (socketRef.current) { socketRef.current.off('signal'); socketRef.current.disconnect(); }
       if (peerConnection.current) peerConnection.current.close();
 
       const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
@@ -204,14 +192,11 @@ export default function Home() {
 
       socketRef.current.on('signal', async (data) => {
         if (data.signal.sdp) {
-          // GUARD: Only set remote description if we are waiting for an answer
-          if (data.signal.type === 'answer' && pc.signalingState === 'have-local-offer') {
+          if (data.signal.type === 'answer') {
             await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
           }
         } else if (data.signal.candidate) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
-          } catch (e) {}
+          try { await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate)); } catch (e) {}
         }
       });
 
@@ -303,7 +288,8 @@ export default function Home() {
             </div>
             <div style={styles.videoBox}>
               <span style={styles.videoLabel}>Live Broadcast</span>
-              <video ref={remoteVideoRef} autoPlay playsInline style={styles.videoElement} />
+              {/* FIXED: Added muted attribute to bypass browser autoplay blocks */}
+              <video ref={remoteVideoRef} autoPlay playsInline muted style={styles.videoElement} />
             </div>
           </div>
         )}
