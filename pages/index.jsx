@@ -4,21 +4,17 @@ export default function Home() {
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [activeTab, setActiveTab] = useState('files'); 
-  
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
-
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
-
   const [roomCode, setRoomCode] = useState(''); 
   const [inputCode, setInputCode] = useState(''); 
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWatching, setIsWatching] = useState(false);
-  
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const agoraClient = useRef(null);
@@ -132,14 +128,16 @@ export default function Home() {
       const code = Math.floor(10000 + Math.random() * 90000).toString();
       setRoomCode(code);
 
-      // GET TOKEN FROM OUR NEW API
+      // Fetch token from API
       const tokenRes = await fetch(`/api/token?channelName=${code}`);
       const { token } = await tokenRes.json();
+      if (!token) throw new Error("Failed to get security token from server");
 
       await agoraClient.current.join(appId, code, null, token);
       const localTrack = await AgoraRTC.createScreenShareTrack({
         encoderConfig: { contentHint: 'text' },
       });
+      
       localTrack.play();
       if (myVideoRef.current) myVideoRef.current.srcObject = localTrack;
       await agoraClient.current.publish([localTrack]);
@@ -153,9 +151,9 @@ export default function Home() {
       await initAgora();
       const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
 
-      // GET TOKEN FROM OUR NEW API
       const tokenRes = await fetch(`/api/token?channelName=${inputCode}`);
       const { token } = await tokenRes.json();
+      if (!token) throw new Error("Invalid Room Code or Token Expired");
 
       await agoraClient.current.join(appId, inputCode, null, token);
       
@@ -274,7 +272,7 @@ export default function Home() {
               </div>
             </div>
             <div style={styles.playerControls}>
-              <div style={styles.btnGroup}>
+              <div style, {styles.btnGroup}>
                 <button onClick={() => controlSpotify('prev')} style={styles.musicBtn}>⏮</button>
                 <button onClick={() => controlSpotify(track.is_playing ? 'pause' : 'play')} style={styles.playBtn}>{track.is_playing ? '⏸' : '▶'}</button>
                 <button onClick={() => controlSpotify('next')} style={styles.musicBtn}>⏭</button>
