@@ -2,23 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
 export default function Home() {
-  // AUTH & UI STATE
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [activeTab, setActiveTab] = useState('files'); 
-  
-  // FILE EXPLORER STATE
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
-
-  // SPOTIFY STATE
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
-
-  // P2P STATE
   const [roomCode, setRoomCode] = useState(''); 
   const [inputCode, setInputCode] = useState(''); 
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
@@ -46,12 +39,9 @@ export default function Home() {
           const data = await res.json();
           if (data.item) {
             setTrack({
-              name: data.item.name, 
-              artist: data.item.artists[0].name,
-              image: data.item.album.images[0].url, 
-              progress: data.progress_ms,
-              duration: data.item.duration_ms, 
-              is_playing: data.is_playing,
+              name: data.item.name, artist: data.item.artists[0].name,
+              image: data.item.album.images[0].url, progress: data.progress_ms,
+              duration: data.item.duration_ms, is_playing: data.is_playing,
               volume: data.device?.volume_percent || 50
             });
           }
@@ -93,9 +83,7 @@ export default function Home() {
         if (done) break;
         chunks.push(value);
         receivedLength += value.length;
-        if (contentLength) {
-          setDownloadProgress(Math.round((receivedLength / contentLength) * 100));
-        }
+        if (contentLength) setDownloadProgress(Math.round((receivedLength / contentLength) * 100));
       }
       const blob = new Blob(chunks);
       const url = window.URL.createObjectURL(blob);
@@ -120,68 +108,103 @@ export default function Home() {
     window.location.href = url;
   };
 
-  const setupPeer = async (isStreamer) => {
-    const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
-    if(!serverUrl) return alert("Server URL not set in Vercel!");
-
-    socketRef.current = io(serverUrl);
-
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    if (myVideoRef.current) myVideoRef.current.srcObject = stream;
-
+  // P2P CORE
+  const createPeer = (stream = null) => {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
-    peerConnection.current = pc;
 
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    if (stream) {
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    }
 
     pc.onicecandidate = (event) => {
-      if (event.candidate) {
+      if (event.candidate && socketRef.current) {
         socketRef.current.emit('signal', { room: roomCode, signal: { candidate: event.candidate } });
       }
     };
 
-    if (isStreamer) {
-      const code = Math.floor(10000 + Math.random() * 90000).toString();
-      setRoomCode(code);
-      socketRef.current.emit('join-room', code);
-    }
-
-    socketRef.current.on('signal', async (data) => {
-      if (data.signal.sdp) {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
-        if (data.signal.type === 'offer') {
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          socketRef.current.emit('signal', { room: roomCode, signal: pc.localDescription });
-        }
-      } else if (data.signal.candidate) {
-        await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
-      }
-    });
-
     pc.ontrack = (event) => {
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
-      setConnectionStatus('Connected');
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = event.streams[0];
+        setConnectionStatus('Connected');
+      }
     };
+
+    return pc;
   };
 
   const startStreaming = async () => {
-    setConnectionStatus('Initializing...');
-    await setupPeer(true);
+    try {
+      setConnectionStatus('Initializing...');
+      const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
+      socketRef.current = io(serverUrl);
+
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      if (myVideoRef.current) myVideoRef.current.srcObject = stream;
+
+      const pc = createPeer(stream);
+      peerConnection.current = pc;
+
+      const code = Math.floor(10000 + Math.random() * 90000).toString();
+      setRoomCode(code);
+      socketRef.current.emit('join-room', code);
+
+      socketRef.current.on('signal', async (data) => {
+        if (data.signal.sdp) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
+          if (data.signal.type === 'offer') {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
+          }
+        } else if (data.signal.candidate) {
+          await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+        }
+      });
+
+      setConnectionStatus('Live');
+    } catch (e) { alert("Stream failed: " + e.message); }
   };
 
   const joinStream = async () => {
     if (inputCode.length !== 5) return alert("Enter 5-digit code");
-    setRoomCode(inputCode);
     setConnectionStatus('Connecting...');
-    await setupPeer(false);
-    const pc = peerConnection.current;
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    socketRef.current.emit('signal', { room: inputCode, signal: pc.localDescription });
-    socketRef.current.emit('join-room', inputCode);
+    
+    try {
+      const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
+      socketRef.current = io(serverUrl);
+      const code = inputCode;
+      setRoomCode(code);
+      socketRef.current.emit('join-room', code);
+
+      const pc = createPeer();
+      peerConnection.current = pc;
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
+
+      socketRef.current.on('signal', async (data) => {
+        if (data.signal.sdp) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
+          if (data.signal.type === 'offer') {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
+          }
+        } else if (data.signal.candidate) {
+          await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+        }
+      });
+
+      pc.ontrack = (event) => {
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+          setConnectionStatus('Connected');
+        }
+      };
+    } catch (e) { alert("Join failed: " + e.message); }
   };
 
   if (!isAuthorized) {
@@ -253,7 +276,7 @@ export default function Home() {
             </div>
             <div style={styles.previewBox}>
               <span style={styles.previewLabel}>Local Preview</span>
-              <video ref={myVideoRef} autoPlay muted style={styles.videoElement} />
+              <video ref={myVideoRef} autoPlay muted playsInline style={styles.videoElement} />
             </div>
           </div>
         ) : (
@@ -268,7 +291,7 @@ export default function Home() {
             </div>
             <div style={styles.videoBox}>
               <span style={styles.videoLabel}>Live Broadcast</span>
-              <video ref={remoteVideoRef} autoPlay style={styles.videoElement} />
+              <video ref={remoteVideoRef} autoPlay playsInline style={styles.videoElement} />
             </div>
           </div>
         )}
@@ -349,7 +372,7 @@ const styles = {
   artistName: { fontSize: '0.7rem', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis' },
   playerControls: { display: 'flex', alignItems: 'center', gap: '20px' },
   btnGroup: { display: 'flex', alignItems: 'center', gap: '12px' },
-  musicBtn: { background: 'transparent', border: 'none', color: 'aaa', cursor: 'pointer', fontSize: '1rem', padding: '5px' },
+  musicBtn: { background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', fontSize: '1rem', padding: '5px' },
   playBtn: { background: '#fff', color: '#000', border: 'none', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   volumeGroup: { display: 'flex', alignItems: 'center', gap: '8px' },
   volIcon: { color: '#555', fontSize: '0.8rem' },
