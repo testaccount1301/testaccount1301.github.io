@@ -1,15 +1,28 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 export default function Home() {
+  // AUTH & UI STATE
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [activeTab, setActiveTab] = useState('files'); // 'files' or 'screen'
+  
+  // FILE EXPLORER STATE
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
+
+  // SPOTIFY STATE
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
+
+  // SCREEN SHARE STATE
+  const [peerId, setPeerId] = useState('');
+  const [remoteStream, setRemoteStream] = useState(null);
+  const [isSharing, setIsSharing] = useState(false);
+  const myVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -29,12 +42,9 @@ export default function Home() {
           const data = await res.json();
           if (data.item) {
             setTrack({
-              name: data.item.name,
-              artist: data.item.artists[0].name,
-              image: data.item.album.images[0].url,
-              progress: data.progress_ms,
-              duration: data.item.duration_ms,
-              is_playing: data.is_playing,
+              name: data.item.name, artist: data.item.artists[0].name,
+              image: data.item.album.images[0].url, progress: data.progress_ms,
+              duration: data.item.duration_ms, is_playing: data.is_playing,
               volume: data.device?.volume_percent || 50
             });
           }
@@ -94,22 +104,46 @@ export default function Home() {
     await fetch(`/api/spotify/callback?${query}&token=${spotifyToken}`);
   };
 
-  // VOLUME DEBOUNCE: Prevents API spamming while sliding
-  const handleVolumeChange = (e) => {
-    const val = e.target.value;
-    setTrack(prev => ({ ...prev, volume: val })); // Update UI instantly
-    
-    clearTimeout(window.volTimer);
-    window.volTimer = setTimeout(() => {
-      controlSpotify('volume', val);
-    }, 300); // Only send to Spotify after 300ms of no moving
-  };
-
   const connectSpotify = () => {
     const clientID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID;
     const scope = 'user-modify-playback-state user-read-playback-state';
     const url = `https://accounts.spotify.com/authorize?client_id=${clientID}&response_type=code&redirect_uri=https://testaccount1301githubio.vercel.app/api/spotify/callback&scope=${scope}`;
     window.location.href = url;
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'screen') return;
+    const script = document.createElement('script');
+    script.src = "https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js";
+    script.async = true;
+    script.onload = () => {
+      const peer = new window.Peer();
+      peer.on('open', (id) => setPeerId(id));
+      peer.on('call', (call) => {
+        call.answer();
+        call.on('stream', (remoteStream) => {
+          setRemoteStream(remoteStream);
+        });
+      });
+    };
+    document.body.appendChild(script);
+  }, [activeTab]);
+
+  const startScreenShare = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      if (myVideoRef.current) myVideoRef.current.srcObject = stream;
+      setIsSharing(true);
+      const peer = new window.Peer();
+      peer.on('open', (id) => {
+        alert("Your Peer ID: " + id + "\nShare this ID with the viewer!");
+      });
+      const urlParams = new URLSearchParams(window.location.search);
+      const remoteId = urlParams.get('peer');
+      if (remoteId) {
+        const call = peer.call(remoteId, stream);
+      }
+    } catch (e) { alert("Screen share denied"); }
   };
 
   if (!isAuthorized) {
@@ -126,43 +160,70 @@ export default function Home() {
 
   return (
     <main style={styles.main}>
-      <div style={styles.container}>
-        <div style={styles.header}>
-          <div style={styles.titleGroup}>
-            <h1 style={styles.title}>File Explorer</h1>
-            <div style={styles.breadcrumb}>
-              <span style={{color: '#555'}}>Root</span> {currentPath && <span> / {currentPath}</span>}
-            </div>
-          </div>
-          <button onClick={() => fetchFiles('')} style={styles.rootBtn}>🏠 Home</button>
+      <nav style={styles.nav}>
+        <div style={styles.navLinks}>
+          <button onClick={() => setActiveTab('files')} style={{...styles.tabBtn, color: activeTab === 'files' ? '#fff' : '#666', borderBottom: activeTab === 'files' ? '2px solid #fff' : 'none'}}>📁 Vault</button>
+          <button onClick={() => setActiveTab('screen')} style={{...styles.tabBtn, color: activeTab === 'screen' ? '#fff' : '#666', borderBottom: activeTab === 'screen' ? '2px solid #fff' : 'none'}}>📺 Live Share</button>
         </div>
+      </nav>
 
-        {isDownloading && (
-          <div style={styles.progressWrapper}>
-            <div style={styles.progressText}>Downloading asset... {downloadProgress}%</div>
-            <div style={styles.progressBarBg}><div style={{ ...styles.progressBarFill, width: `${downloadProgress}%` }}></div></div>
-          </div>
-        )}
-
-        {loading ? <div style={styles.loading}>Loading Vault...</div> : (
-          <div style={styles.fileGrid}>
-            {files.map((file, i) => (
-              <div key={i} style={styles.fileCard}>
-                <div style={styles.cardMain}>
-                  <div style={styles.fileIcon}>{file.type === 'dir' ? '📂' : '📄'}</div>
-                  <div style={styles.fileInfo}>
-                    <div style={styles.fileName}>{file.name}</div>
-                    <div style={styles.fileDesc}>{file.description}</div>
-                  </div>
-                </div>
-                <div style={styles.cardFooter}>
-                  {file.type === 'dir' ? 
-                    <button onClick={() => fetchFiles(`${currentPath}/${file.path}`)} style={styles.actionBtn}>Open Folder</button> : 
-                    <button onClick={() => handleDownload(file.path)} style={styles.actionBtn}>Download</button>
-                  }
+      <div style={styles.container}>
+        {activeTab === 'files' ? (
+          <>
+            <div style={styles.header}>
+              <div style={styles.titleGroup}>
+                <h1 style={styles.title}>File Explorer</h1>
+                <div style={styles.breadcrumb}>
+                  <span style={{color: '#555'}}>Root</span> {currentPath && <span> / {currentPath}</span>}
                 </div>
               </div>
-            ))}
+              <button onClick={() => fetchFiles('')} style={styles.rootBtn}>🏠 Home</button>
+            </div>
+            {isDownloading && (
+              <div style={styles.progressWrapper}>
+                <div style={styles.progressText}>Downloading... {downloadProgress}%</div>
+                <div style={styles.progressBarBg}><div style={{ ...styles.progressBarFill, width: `${downloadProgress}%` }}></div></div>
+              </div>
+            )}
+            {loading ? <div style={styles.loading}>Loading Vault...</div> : (
+              <div style={styles.fileGrid}>
+                {files.map((file, i) => (
+                  <div key={i} style={styles.fileCard}>
+                    <div style={styles.cardMain}>
+                      <div style={styles.fileIcon}>{file.type === 'dir' ? '📂' : '📄'}</div>
+                      <div style={styles.fileInfo}>
+                        <div style={styles.fileName}>{file.name}</div>
+                        <div style={styles.fileDesc}>{file.description}</div>
+                      </div>
+                    </div>
+                    <div style={styles.cardFooter}>
+                      {file.type === 'dir' ? <button onClick={() => fetchFiles(`${currentPath}/${file.path}`)} style={styles.actionBtn}>Open</button> : <button onClick={() => handleDownload(file.path)} style={styles.actionBtn}>Download</button>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={styles.screenShareContainer}>
+            <div style={styles.screenHeader}>
+              <h2 style={styles.screenTitle}>Live Screen Sharing</h2>
+              <p style={styles.screenSubtitle}>Share your screen in real-time via a secure P2P link.</p>
+            </div>
+            <div style={styles.screenControls}>
+              <button onClick={startScreenShare} style={styles.shareBtn}>Start Sharing Screen</button>
+              {peerId && <div style={styles.peerInfo}>Your ID: <code style={styles.peerCode}>{peerId}</code></div>}
+            </div>
+            <div style={styles.videoGrid}>
+              <div style={styles.videoBox}>
+                <span style={styles.videoLabel}>Your Stream</span>
+                <video ref={myVideoRef} autoPlay muted style={styles.videoElement} />
+              </div>
+              <div style={styles.videoBox}>
+                <span style={styles.videoLabel}>Remote Stream</span>
+                <video ref={remoteVideoRef} autoPlay style={styles.videoElement} />
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -175,7 +236,7 @@ export default function Home() {
         ) : (
           <>
             <div style={styles.trackInfo}>
-              <img src={track.image} style={styles.albumArt} alt="Album Art" />
+              <img src={track.image} style={styles.albumArt} alt="Art" />
               <div style={styles.trackText}>
                 <div style={styles.songName}>{track.name}</div>
                 <div style={styles.artistName}>{track.artist}</div>
@@ -184,21 +245,17 @@ export default function Home() {
             <div style={styles.playerControls}>
               <div style={styles.btnGroup}>
                 <button onClick={() => controlSpotify('prev')} style={styles.musicBtn}>⏮</button>
-                <button onClick={() => controlSpotify(track.is_playing ? 'pause' : 'play')} style={styles.playBtn}>
-                  {track.is_playing ? '⏸' : '▶'}
-                </button>
+                <button onClick={() => controlSpotify(track.is_playing ? 'pause' : 'play')} style={styles.playBtn}>{track.is_playing ? '⏸' : '▶'}</button>
                 <button onClick={() => controlSpotify('next')} style={styles.musicBtn}>⏭</button>
               </div>
               <div style={styles.volumeGroup}>
                 <span style={styles.volIcon}>🔊</span>
-                <input type="range" min="0" max="100" value={track.volume || 0} onChange={handleVolumeChange} style={styles.volSlider} />
+                <input type="range" min="0" max="100" value={track.volume || 0} onChange={(e) => controlSpotify('volume', e.target.value)} style={styles.volSlider} />
               </div>
             </div>
             <div style={styles.timerGroup}>
                <div style={styles.timerText}>{Math.floor(track.progress / 60000)}:{(Math.floor((track.progress % 60000) / 1000)).toString().padStart(2, '0')}</div>
-               <div style={styles.progressMiniBg}>
-                  <div style={{...styles.progressMiniFill, width: `${(track.progress / track.duration) * 100}%`}}></div>
-               </div>
+               <div style={styles.progressMiniBg}><div style={{...styles.progressMiniFill, width: `${(track.progress / track.duration) * 100}%`}}></div></div>
             </div>
           </>
         )}
@@ -209,7 +266,10 @@ export default function Home() {
 
 const styles = {
   main: { padding: '3rem 1rem', fontFamily: '"Inter", sans-serif', backgroundColor: '#050505', minHeight: '100vh', color: '#eee', paddingBottom: '120px' },
-  container: { maxWidth: '1000px', margin: '0 auto' },
+  nav: { display: 'flex', justifyContent: 'center', marginBottom: '3rem' },
+  navLinks: { display: 'flex', gap: '2rem', background: '#111', padding: '0.5rem', borderRadius: '12px', border: '1px solid #222' },
+  tabBtn: { background: 'transparent', border: 'none', padding: '0.6rem 1.5rem', cursor: 'pointer', fontSize: '0.9rem', fontWeight: '500', transition: '0.2s' },
+  container: { maxWidth: '1100px', margin: '0 auto' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3rem', borderBottom: '1px solid #111', paddingBottom: '1.5rem' },
   titleGroup: { display: 'flex', flexDirection: 'column', gap: '0.4rem' },
   title: { fontSize: '2rem', fontWeight: '700', margin: 0, color: '#fff' },
@@ -252,4 +312,16 @@ const styles = {
   timerText: { fontSize: '0.65rem', color: '#555', marginBottom: '4px', fontFamily: 'monospace' },
   progressMiniBg: { height: '3px', width: '100%', background: '#222', borderRadius: '2px', overflow: 'hidden' },
   progressMiniFill: { height: '100%', background: '#1db954' },
+  screenShareContainer: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem' },
+  screenHeader: { textAlign: 'center' },
+  screenTitle: { fontSize: '2rem', fontWeight: '700', color: '#fff', margin: 0 },
+  screenSubtitle: { color: '#666', fontSize: '0.9rem' },
+  screenControls: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' },
+  shareBtn: { padding: '1rem 2rem', borderRadius: '12px', border: 'none', background: '#fff', color: '#000', fontWeight: 'bold', cursor: 'pointer', fontSize: '1rem' },
+  peerInfo: { fontSize: '0.85rem', color: '#888' },
+  peerCode: { color: '#3b82f6', fontWeight: 'bold' },
+  videoGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '2rem', width: '100%', marginTop: '2rem' },
+  videoBox: { background: '#111', borderRadius: '16px', border: '1px solid #222', overflow: 'hidden', display: 'flex', flexDirection: 'column' },
+  videoLabel: { padding: '0.5rem', fontSize: '0.7rem', color: '#555', textAlign: 'center', borderBottom: '1px solid #222' },
+  videoElement: { width: '100%', height: 'auto', backgroundColor: '#000' },
 };
