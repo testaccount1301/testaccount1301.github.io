@@ -110,10 +110,7 @@ export default function Home() {
 
   const createPeer = (stream = null) => {
     const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
 
     if (stream) {
@@ -141,7 +138,7 @@ export default function Home() {
       setConnectionStatus('Initializing...');
       const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
       
-      // FIX: Forced WebSockets to prevent Ngrok hang
+      // FIXED: forced websocket transports for Ngrok
       socketRef.current = io(serverUrl, { transports: ['websocket'] });
 
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
