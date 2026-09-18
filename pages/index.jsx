@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 export default function Home() {
   const [password, setPassword] = useState('');
@@ -9,7 +9,7 @@ export default function Home() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [spotifyToken, setSpotifyToken] = useState(null);
-  const [track, setTrack] = useState(null); // Current song info
+  const [track, setTrack] = useState(null);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -20,7 +20,6 @@ export default function Home() {
     }
   }, []);
 
-  // Poll Spotify every 3 seconds to update song info and timer
   useEffect(() => {
     if (!spotifyToken) return;
     const updatePlayer = async () => {
@@ -40,7 +39,7 @@ export default function Home() {
             });
           }
         }
-      } catch (e) { console.error("Spotify sync error"); }
+      } catch (e) {}
     };
     const interval = setInterval(updatePlayer, 3000);
     return () => clearInterval(interval);
@@ -90,12 +89,20 @@ export default function Home() {
     }
   };
 
-  const controlSpotify = async (action) => {
-    await fetch(`/api/spotify/callback?action=${action}&token=${spotifyToken}`);
-    // Manually trigger a refresh so the UI updates immediately
-    const res = await fetch(`/api/spotify/callback?token=${spotifyToken}`);
-    const data = await res.json();
-    if (data.item) setTrack({ ...data, is_playing: data.is_playing });
+  const controlSpotify = async (action, value = '') => {
+    const query = value ? `action=${action}&volume=${value}` : `action=${action}`;
+    await fetch(`/api/spotify/callback?${query}&token=${spotifyToken}`);
+  };
+
+  // VOLUME DEBOUNCE: Prevents API spamming while sliding
+  const handleVolumeChange = (e) => {
+    const val = e.target.value;
+    setTrack(prev => ({ ...prev, volume: val })); // Update UI instantly
+    
+    clearTimeout(window.volTimer);
+    window.volTimer = setTimeout(() => {
+      controlSpotify('volume', val);
+    }, 300); // Only send to Spotify after 300ms of no moving
   };
 
   const connectSpotify = () => {
@@ -160,7 +167,6 @@ export default function Home() {
         )}
       </div>
 
-      {/* ADVANCED MUSIC BAR */}
       <div style={styles.musicBar}>
         {!spotifyToken ? (
           <button onClick={connectSpotify} style={styles.connectBtn}>Connect Spotify</button>
@@ -185,12 +191,7 @@ export default function Home() {
               </div>
               <div style={styles.volumeGroup}>
                 <span style={styles.volIcon}>🔊</span>
-                <input 
-                  type="range" min="0" max="100" 
-                  value={track.volume || 0} 
-                  onChange={(e) => controlSpotify(`volume&volume=${e.target.value}`)}
-                  style={styles.volSlider} 
-                />
+                <input type="range" min="0" max="100" value={track.volume || 0} onChange={handleVolumeChange} style={styles.volSlider} />
               </div>
             </div>
             <div style={styles.timerGroup}>
