@@ -9,7 +9,7 @@ export default async function handler(req, res) {
     const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
       headers: { 
         'Authorization': `Bearer ${token}`, 
-        'User-Agent': 'Vercel-App-Downloader',
+        'User-Agent': 'Vercel-App',
         'Accept': 'application/vnd.github.v3.raw' 
       },
     });
