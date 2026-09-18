@@ -1,23 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 export default function Home() {
+  // AUTH & UI STATE
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [activeTab, setActiveTab] = useState('files'); 
   
+  // FILE EXPLORER STATE
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
 
+  // SPOTIFY STATE
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
 
   // AGORA STATE
-  const [channelName, setChannelName] = useState('main-vault');
+  const [roomCode, setRoomCode] = useState(''); // The 5-digit code
+  const [inputCode, setInputCode] = useState(''); // Code entered by watcher
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWatching, setIsWatching] = useState(false);
+  
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const agoraClient = useRef(null);
@@ -109,28 +114,35 @@ export default function Home() {
     window.location.href = url;
   };
 
-  // AGORA CORE ENGINE
+  // AGORA ENGINE
   const initAgora = async () => {
     if (!window.AgoraRTC) {
-      const script = document.createElement('script');
-      script.src = "https://download.agora.io/sdk/release/AgoraRTC_N-4.18.0.js";
-      script.async = true;
-      await new Promise(resolve => { script.onload = resolve; });
-      document.body.appendChild(script);
+      await new Promise((resolve) => {
+        const script = document.createElement('script');
+        script.src = "https://download.agora.io/sdk/release/AgoraRTC_N-4.18.0.js";
+        script.async = true;
+        script.onload = resolve;
+        document.body.appendChild(script);
+      });
     }
-    agoraClient.current = window.AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+    if (!agoraClient.current) {
+      agoraClient.current = window.AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+    }
   };
 
   const startStream = async () => {
     try {
       await initAgora();
-      const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID; // You can pass this from Vercel via a public var or hardcode it
-      const uid = null; // Let Agora assign a random ID
-      
-      await agoraClient.current.join(appId, channelName, uid, null);
-      
+      const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
+      if (!appId) return alert("Agora App ID missing in Vercel settings!");
+
+      // Generate random 5-digit code
+      const code = Math.floor(10000 + Math.random() * 90000).toString();
+      setRoomCode(code);
+
+      await agoraClient.current.join(appId, code, null, null);
       const localTrack = await AgoraRTC.createScreenShareTrack({
-        encoderConfig: { contentHint: 'text' }, // Optimized for screen share
+        encoderConfig: { contentHint: 'text' },
       });
       
       localTrack.play();
@@ -141,10 +153,13 @@ export default function Home() {
   };
 
   const joinStream = async () => {
+    if (inputCode.length !== 5) return alert("Please enter a valid 5-digit code");
     try {
       await initAgora();
       const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
-      await agoraClient.current.join(appId, channelName, null, null);
+      if (!appId) return alert("Agora App ID missing in Vercel settings!");
+
+      await agoraClient.current.join(appId, inputCode, null, null);
       
       agoraClient.current.on('user-published', async (user, mediaType) => {
         await agoraClient.current.subscribe(user, mediaType);
@@ -154,7 +169,7 @@ export default function Home() {
         }
       });
       setIsWatching(true);
-    } catch (e) { alert("Join failed: " + e.message); }
+    } catch (e) { alert("Could not join stream: " + e.message); }
     };
 
   if (!isAuthorized) {
@@ -220,9 +235,9 @@ export default function Home() {
           <div style={styles.shareContainer}>
             <div style={styles.settingsCard}>
               <h2 style={styles.sectionTitle}>Broadcaster</h2>
-              <p style={styles.streamSubtitle}>Start your high-def stream for your vault members.</p>
-              <button onClick={startStreaming} style={styles.startBtn}>🚀 Go Live Now</button>
-              {isStreaming && <div style={styles.peerInfo}>Status: <span style={{color: '#22c55e'}}>Live & Broadcasting</span></div>}
+              <p style={styles.streamSubtitle}>Generate a 5-digit code to let others watch your screen.</p>
+              <button onClick={startStream} style={styles.startBtn}>🚀 Go Live Now</button>
+              {roomCode && <div style={styles.peerInfo}>Your Code: <code style={styles.peerCode}>{roomCode}</code></div>}
             </div>
             <div style={styles.previewBox}>
               <span style={styles.previewLabel}>Stream Preview</span>
@@ -233,9 +248,10 @@ export default function Home() {
           <div style={styles.watchContainer}>
             <div style={styles.watchCard}>
               <h2 style={styles.sectionTitle}>Viewer Portal</h2>
-              <p style={styles.streamSubtitle}>Connect to the live stream broadcast.</p>
-              <button onClick={joinStream} style={styles.joinBtn}>Connect to Stream</button>
-              {isWatching && <div style={styles.peerInfo}>Status: <span style={{color: '#22c55e'}}>Viewing Live</span></div>}
+              <div style={styles.inputGroup}>
+                <input type="text" placeholder="Enter 5-digit code" style={styles.input} value={inputCode} onChange={(e) => setInputCode(e.target.value)} />
+                <button onClick={joinStream} style={styles.joinBtn}>Connect</button>
+              </div>
             </div>
             <div style={styles.videoBox}>
               <span style={styles.videoLabel}>Live Broadcast</span>
@@ -307,7 +323,7 @@ const styles = {
   fileIcon: { fontSize: '1.2rem', opacity: 0.5 },
   fileInfo: { flex: 1, overflow: 'hidden' },
   fileName: { fontWeight: '500', color: '#fff', fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  fileDesc: { fontSize: '0.75rem', color: '#555', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  fileDesc: { fontSize: '0.75rem', color: '#555', whitePace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   cardFooter: { textAlign: 'right', borderTop: '1px solid #111', paddingTop: '0.8rem' },
   actionBtn: { background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '0.8rem', fontWeight: '500' },
   loading: { textAlign: 'center', color: '#333', fontSize: '0.9rem', marginTop: '4rem' },
