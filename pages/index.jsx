@@ -1,20 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 export default function Home() {
+  // AUTH & UI STATE
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [activeTab, setActiveTab] = useState('files'); 
+  
+  // FILE EXPLORER STATE
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
+
+  // SPOTIFY STATE
   const [spotifyToken, setSpotifyToken] = useState(null);
   const [track, setTrack] = useState(null);
+
+  // AGORA STATE
   const [roomCode, setRoomCode] = useState(''); 
   const [inputCode, setInputCode] = useState(''); 
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWatching, setIsWatching] = useState(false);
+  
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const agoraClient = useRef(null);
@@ -128,7 +136,6 @@ export default function Home() {
       const code = Math.floor(10000 + Math.random() * 90000).toString();
       setRoomCode(code);
 
-      // Fetch token from API
       const tokenRes = await fetch(`/api/token?channelName=${code}`);
       const { token } = await tokenRes.json();
       if (!token) throw new Error("Failed to get security token from server");
@@ -272,7 +279,7 @@ export default function Home() {
               </div>
             </div>
             <div style={styles.playerControls}>
-              <div style, {styles.btnGroup}>
+              <div style={styles.btnGroup}>
                 <button onClick={() => controlSpotify('prev')} style={styles.musicBtn}>⏮</button>
                 <button onClick={() => controlSpotify(track.is_playing ? 'pause' : 'play')} style={styles.playBtn}>{track.is_playing ? '⏸' : '▶'}</button>
                 <button onClick={() => controlSpotify('next')} style={styles.musicBtn}>⏭</button>
