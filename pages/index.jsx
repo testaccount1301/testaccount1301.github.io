@@ -1,4 +1,4 @@
-'use client'; // <--- THIS LINE PREVENTS THE APPLICATION ERROR
+'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
@@ -19,99 +19,159 @@ export default function Home() {
   const [inputCode, setInputCode] = useState(''); 
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   
+  // Game State
+  const [score, setScore] = useState(0);
+  const [gameStarted, setGameStarted] = useState(false);
+
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const socketRef = useRef(null);
   const peerConnection = useRef(null);
+  const canvasRef = useRef(null); // For Flappy Bird
 
-  // --- HELPER: Create Peer Connection ---
+  // --- FLAPPY BIRD LOGIC ---
+  useEffect(() => {
+    if (activeTab !== 'game') return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    let animationFrameId;
+    
+    let birdY = 250;
+    let birdX = 50;
+    let velocity = 0;
+    let gravity = 0.25;
+    let jump = -4.5;
+    let pipes = [];
+    let frameCount = 0;
+    let gameActive = false;
+    let currentScore = 0;
+
+    const spawnPipe = () => {
+      const gap = 120;
+      const minHeight = 50;
+      const maxHeight = canvas.height - gap - minHeight;
+      const height = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
+      pipes.push({ x: canvas.width, top: height, bottom: canvas.height - height - gap });
+    };
+
+    const gameLoop = () => {
+      // Background
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (gameActive) {
+        // Bird Physics
+        velocity += gravity;
+        birdY += velocity;
+
+        // Pipes logic
+        if (frameCount % 100 === 0) spawnPipe();
+        
+        pipes.forEach((pipe, index) => {
+          pipe.x -= 2;
+          // Draw Pipes
+          ctx.fillStyle = '#333';
+          ctx.fillRect(pipe.x, 0, 50, pipe.top);
+          ctx.fillRect(pipe.x, canvas.height - pipe.bottom, 50, pipe.bottom);
+
+          // Collision Detection
+          if (
+            birdX + 20 > pipe.x && birdX < pipe.x + 50 &&
+            (birdY < pipe.top || birdY + 20 > canvas.height - pipe.bottom)
+          ) {
+            gameActive = false;
+            setGameStarted(false);
+          }
+
+          // Scoring
+          if (pipe.x === 50) {
+            currentScore++;
+            setScore(currentScore);
+          }
+        });
+
+        pipes = pipes.filter(p => p.x > -50);
+
+        if (birdY > canvas.height || birdY < 0) {
+          gameActive = false;
+          setGameStarted(false);
+        }
+      } else {
+        // Start Screen
+        ctx.fillStyle = 'white';
+        ctx.font = '20px Inter';
+        ctx.textAlign = 'center';
+        ctx.fillText('Click or Space to Start', canvas.width / 2, canvas.height / 2);
+      }
+
+      // Draw Bird
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(birdX, birdY, 20, 20);
+
+      frameCount++;
+      animationFrameId = requestAnimationFrame(gameLoop);
+    };
+
+    const handleInput = () => {
+      if (!gameActive) {
+        gameActive = true;
+        setGameStarted(true);
+        birdY = 250;
+        velocity = 0;
+        pipes = [];
+        currentScore = 0;
+        setScore(0);
+      } else {
+        velocity = jump;
+      }
+    };
+
+    window.addEventListener('keydown', (e) => { if(e.code === 'Space') handleInput(); });
+    canvas.addEventListener('mousedown', handleInput);
+
+    gameLoop();
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('keydown', handleInput);
+      canvas.removeEventListener('mousedown', handleInput);
+    };
+  }, [activeTab]);
+
+  // --- EXISTING STREAM LOGIC ---
   const createPeer = (stream = null) => {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    });
-
-    if (stream) {
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-    }
-
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    if (stream) stream.getTracks().forEach(track => pc.addTrack(track, stream));
     pc.onicecandidate = (event) => {
       if (event.candidate && socketRef.current) {
         socketRef.current.emit('signal', { room: roomCode, signal: { candidate: event.candidate } });
       }
     };
-
     pc.ontrack = async (event) => {
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = event.streams[0];
-        try {
-          await remoteVideoRef.current.play();
-          setConnectionStatus('Connected');
-        } catch (e) {
-          setConnectionStatus('Connected (Blocked)');
-        }
+        try { await remoteVideoRef.current.play(); setConnectionStatus('Connected'); } 
+        catch (e) { setConnectionStatus('Connected (Blocked)'); }
       }
     };
     return pc;
   };
 
-  // --- CORE: Join Stream ---
-  const joinStream = async (codeFromUrl = null) => {
-    const code = codeFromUrl || inputCode;
-    if (!code || code.length !== 5) {
-      if (!codeFromUrl) alert("Enter 5-digit code");
-      return;
-    }
-    
-    setConnectionStatus('Connecting...');
-    try {
-      if (socketRef.current) { socketRef.current.off('signal'); socketRef.current.disconnect(); }
-      if (peerConnection.current) peerConnection.current.close();
-
-      const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
-      socketRef.current = io(serverUrl, { transports: ['websocket'] });
-      setRoomCode(code);
-      socketRef.current.emit('join-room', code);
-
-      const pc = createPeer();
-      peerConnection.current = pc;
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
-
-      socketRef.current.on('signal', async (data) => {
-        if (data.signal.sdp) {
-          if (data.signal.type === 'answer') {
-            await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
-          }
-        } else if (data.signal.candidate) {
-          try { await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate)); } catch (e) {}
-        }
-      });
-      setConnectionStatus('Connected');
-    } catch (e) { console.error("Join failed:", e); }
-  };
-
-  // --- CORE: Start Streaming ---
   const startStreaming = async () => {
     try {
       setConnectionStatus('Initializing...');
       if (socketRef.current) { socketRef.current.off('signal'); socketRef.current.disconnect(); }
       if (peerConnection.current) peerConnection.current.close();
-
       const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
       socketRef.current = io(serverUrl, { transports: ['websocket'] });
-
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       if (myVideoRef.current) myVideoRef.current.srcObject = stream;
-
       const pc = createPeer(stream);
       peerConnection.current = pc;
-
       const code = Math.floor(10000 + Math.random() * 90000).toString();
       setRoomCode(code);
       socketRef.current.emit('join-room', code);
-
       socketRef.current.on('signal', async (data) => {
         if (data.signal.sdp) {
           if (data.signal.type === 'offer') {
@@ -128,17 +188,42 @@ export default function Home() {
     } catch (e) { alert("Stream failed: " + e.message); }
   };
 
-  // --- EFFECTS ---
+  const joinStream = async (codeFromUrl = null) => {
+    const code = codeFromUrl || inputCode;
+    if (!code || code.length !== 5) {
+      if (!codeFromUrl) alert("Enter 5-digit code");
+      return;
+    }
+    setConnectionStatus('Connecting...');
+    try {
+      if (socketRef.current) { socketRef.current.off('signal'); socketRef.current.disconnect(); }
+      if (peerConnection.current) peerConnection.current.close();
+      const serverUrl = process.env.NEXT_PUBLIC_STREAM_SERVER_URL;
+      socketRef.current = io(serverUrl, { transports: ['websocket'] });
+      setRoomCode(code);
+      socketRef.current.emit('join-room', code);
+      const pc = createPeer();
+      peerConnection.current = pc;
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socketRef.current.emit('signal', { room: code, signal: pc.localDescription });
+      socketRef.current.on('signal', async (data) => {
+        if (data.signal.sdp) {
+          if (data.signal.type === 'answer') { await pc.setRemoteDescription(new RTCSessionDescription(data.signal)); }
+        } else if (data.signal.candidate) {
+          try { await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate)); } catch (e) {}
+        }
+      });
+      setConnectionStatus('Connected');
+    } catch (e) { console.error("Join failed:", e); }
+  };
+
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('spotify_token');
     if (token) setSpotifyToken(token);
-
     const room = urlParams.get('room');
-    if (room) {
-      setActiveTab('watch');
-      joinStream(room);
-    }
+    if (room) { setActiveTab('watch'); joinStream(room); }
   }, []);
 
   useEffect(() => {
@@ -163,7 +248,6 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [spotifyToken]);
 
-  // --- OTHER FUNCTIONS ---
   const fetchFiles = async (path = '') => {
     setLoading(true);
     try {
@@ -239,6 +323,7 @@ export default function Home() {
           <button onClick={() => setActiveTab('files')} style={{...styles.tabBtn, color: activeTab === 'files' ? '#fff' : '#666', borderBottom: activeTab === 'files' ? '2px solid #fff' : 'none'}}>📁 Vault</button>
           <button onClick={() => setActiveTab('stream')} style={{...styles.tabBtn, color: activeTab === 'stream' ? '#fff' : '#666', borderBottom: activeTab === 'stream' ? '2px solid #fff' : 'none'}}>📡 Stream</button>
           <button onClick={() => setActiveTab('watch')} style={{...styles.tabBtn, color: activeTab === 'watch' ? '#fff' : '#666', borderBottom: activeTab === 'watch' ? '2px solid #fff' : 'none'}}>📺 Watch</button>
+          <button onClick={() => setActiveTab('game')} style={{...styles.tabBtn, color: activeTab === 'game' ? '#fff' : '#666', borderBottom: activeTab === 'game' ? '2px solid #fff' : 'none'}}>🎮 Game</button>
         </div>
       </nav>
 
@@ -297,7 +382,7 @@ export default function Home() {
               <video ref={myVideoRef} autoPlay muted playsInline style={styles.videoElement} />
             </div>
           </div>
-        ) : (
+        ) : activeTab === 'watch' ? (
           <div style={styles.watchContainer}>
             <div style={styles.watchCard}>
               <h2 style={styles.sectionTitle}>Viewer Portal</h2>
@@ -311,6 +396,15 @@ export default function Home() {
               <span style={styles.videoLabel}>Live Broadcast</span>
               <video ref={remoteVideoRef} autoPlay playsInline muted style={styles.videoElement} />
             </div>
+          </div>
+        ) : (
+          <div style={styles.gameContainer}>
+            <div style={styles.gameHeader}>
+              <h2 style={styles.sectionTitle}>Vault Bird</h2>
+              <div style={styles.scoreBoard}>Score: {score}</div>
+            </div>
+            <canvas ref={canvasRef} width={400} height={500} style={styles.gameCanvas} />
+            <p style={styles.gameHint}>Press Space or Click to Jump</p>
           </div>
         )}
       </div>
@@ -416,4 +510,9 @@ const styles = {
   videoBox: { width: '100%', maxWidth: '1000px', background: '#000', borderRadius: '16px', border: '1px solid #222', overflow: 'hidden' },
   videoLabel: { display: 'block', padding: '0.5rem', fontSize: '0.7rem', color: '#444', textAlign: 'center', borderBottom: '1px solid #222' },
   statusText: { marginTop: '1rem', fontSize: '0.8rem', color: '#666' },
+  gameContainer: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' },
+  gameHeader: { display: 'flex', justifyContent: 'space-between', width: '400px', alignItems: 'center' },
+  scoreBoard: { fontSize: '1.5rem', fontWeight: 'bold', color: '#fff' },
+  gameCanvas: { border: '2px solid #222', borderRadius: '8px', backgroundColor: '#000' },
+  gameHint: { color: '#666', fontSize: '0.8rem' },
 };
