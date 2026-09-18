@@ -2,23 +2,32 @@ import { NextResponse } from 'next/server';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const filePath = searchParams.get('path');
-  if (!filePath) return NextResponse.json({ error: 'Path is required' }, { status: 400 });
+  const path = searchParams.get('path') || ''; // Get current folder path
+  const password = searchParams.get('password'); // Get password from request
+
+  // 1. Check Password
+  if (password !== process.env.SITE_PASSWORD) {
+    return NextResponse.json({ error: 'Incorrect Password' }, { status: 401 });
+  }
 
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPO;
-  if (!token || !repo) return NextResponse.json({ error: 'Server config missing' }, { status: 500 });
 
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${filePath}`, {
-      headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3.raw' },
+    // 2. Ask GitHub for the contents of the current path
+    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+      headers: { Authorization: `token ${token}` },
     });
-    if (!response.ok) return NextResponse.json({ error: 'File not found' }, { status: response.status });
-    const blob = await response.blob();
-    return new NextResponse(blob, {
-      headers: { 'Content-Disposition': `attachment; filename="${filePath.split('/').pop()}"`, 'Content-Type': 'application/octet-stream' },
-    });
+
+    if (!response.ok) {
+      return NextResponse.json({ error: 'Folder not found' }, { status: response.status });
+    }
+
+    const data = await response.json();
+    
+    // GitHub returns an array of files/folders. We send that list to the frontend.
+    return NextResponse.json(data);
   } catch (error) {
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: 'Server Error' }, { status: 500 });
   }
 }
