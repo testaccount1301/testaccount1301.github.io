@@ -27,6 +27,7 @@ export default function Home() {
   const myVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerInstance = useRef(null);
+  const localStreamRef = useRef(null);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -37,6 +38,7 @@ export default function Home() {
     }
   }, []);
 
+  // SPOTIFY SYNC
   useEffect(() => {
     if (!spotifyToken) return;
     const updatePlayer = async () => {
@@ -59,6 +61,7 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [spotifyToken]);
 
+  // FILE LOGIC
   const fetchFiles = async (path = '') => {
     setLoading(true);
     try {
@@ -115,37 +118,34 @@ export default function Home() {
     window.location.href = url;
   };
 
-  // P2P LOGIC
+  // P2P ENGINE - Initialized once on mount
   useEffect(() => {
-    if (activeTab === 'files') return;
-    
     const script = document.createElement('script');
     script.src = "https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js";
     script.async = true;
     script.onload = () => {
-      const peer = new window.Peer({ config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] }});
+      // Use Google's STUN servers to help bypass firewalls
+      const peer = new window.Peer({
+        config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] }
+      });
       peerInstance.current = peer;
 
       peer.on('open', (id) => setPeerId(id));
 
       peer.on('call', (call) => {
-        setConnectionStatus('Incoming call...');
-        // If we have a stream, answer with it
-        const stream = myVideoRef.current ? myVideoRef.current.srcObject : new MediaStream();
+        setConnectionStatus('Incoming Stream...');
+        // If we have a local stream, send it. Otherwise send empty.
+        const stream = localStreamRef.current || new MediaStream();
         call.answer(stream);
         call.on('stream', (remoteStream) => {
-          setRemoteStream(remoteStream);
           if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
           setConnectionStatus('Connected');
         });
       });
     };
     document.body.appendChild(script);
-
-    return () => {
-      if (peerInstance.current) peerInstance.current.destroy();
-    };
-  }, [activeTab]);
+    return () => { if (peerInstance.current) peerInstance.current.destroy(); };
+  }, []);
 
   const startStreaming = async () => {
     try {
@@ -158,9 +158,10 @@ export default function Home() {
         audio: withAudio
       };
       const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+      localStreamRef.current = stream;
       if (myVideoRef.current) myVideoRef.current.srcObject = stream;
       setIsSharing(true);
-    } catch (e) { alert("Screen capture failed: " + e.message); }
+    } catch (e) { alert("Capture failed: " + e.message); }
   };
 
   const joinStream = async () => {
@@ -169,11 +170,10 @@ export default function Home() {
     
     try {
       const peer = peerInstance.current;
-      // Call the streamer with a dummy stream
+      // We call the streamer. We send a dummy stream so they can answer.
       const call = peer.call(remotePeerId, new MediaStream());
       
       call.on('stream', (remoteStream) => {
-        setRemoteStream(remoteStream);
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = remoteStream;
           remoteVideoRef.current.play().catch(e => console.log("Autoplay blocked"));
@@ -181,11 +181,9 @@ export default function Home() {
         setConnectionStatus('Connected');
       });
 
-      call.on('error', (err) => {
-        setConnectionStatus('Error: ' + err);
-      });
+      call.on('close', () => setConnectionStatus('Stream Ended'));
     } catch (e) { 
-      setConnectionStatus('Connection failed');
+      setConnectionStatus('Failed');
       alert("Connection failed: " + e.message); 
     }
   };
